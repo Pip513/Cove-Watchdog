@@ -107,18 +107,38 @@ delivery without waiting for a real failure or mailing about a healthy machine.
 
 ## Deploy to Azure
 
-### Python version
+### Python version, and why it decides your hosting plan
 
-Azure Functions supports specific Python versions, and they lag the latest
-release. Create the Function App with **3.11** (or 3.12 if your tooling offers
-it) and develop against the same version locally. If your local Python is newer
-than the Function App's runtime, the code will still run — nothing here uses
-syntax past 3.10 — but you will not be testing what you deploy.
+Azure Functions supports Python 3.10 through 3.14, all GA. **But the classic
+Linux Consumption plan stops at 3.12** — newer versions are only added to Flex
+Consumption, and Microsoft is steering Consumption apps toward Flex.
+
+So the version you want determines the plan you create:
+
+| Want | Plan | Note |
+|---|---|---|
+| 3.13 or 3.14 | **Flex Consumption** | Where Microsoft is investing. Limited regions |
+| 3.12 or lower | Either | Classic Consumption is capped here |
+
+Avoid 3.10 — its support ends October 2026. Prefer 3.12 over 3.11 even on
+classic Consumption: a year more runway for no extra effort.
+
+**Match your local version to the deployed one.** Nothing in this project uses
+syntax past 3.10, so it runs anywhere in that range, but if they differ you are
+not testing what you ship.
+
+Documentation pages disagree about which versions Flex accepts, so **ask your
+own subscription rather than trusting any doc, including this one**:
+
+```bash
+az functionapp list-runtimes --os linux \
+  --query "linux[?starts_with(runtime,'python')].{runtime:runtime, version:version}" -o table
+```
 
 ### Prerequisites
 
 ```bash
-az --version          # Azure CLI
+az --version          # Azure CLI, 2.60.0 or later for Flex Consumption
 func --version        # Azure Functions Core Tools v4
 az login
 ```
@@ -128,11 +148,20 @@ az login
 Names for the storage account and Function App must be **globally unique**. The
 storage account must be lowercase alphanumeric, 3–24 characters.
 
+Flex Consumption is not available in every region, so pick from the supported
+list:
+
+```bash
+az functionapp list-flexconsumption-locations \
+  --query "sort_by(@, &name)[].{Region:name}" -o table
+```
+
 ```bash
 RG=rg-cove-watchdog
-LOCATION=eastus
+LOCATION=eastus          # must appear in the list above
 STORAGE=covewatchdogsa$RANDOM
 APP=cove-watchdog-$RANDOM
+PYVER=3.12               # confirm with list-runtimes first
 
 az group create --name $RG --location $LOCATION
 
@@ -140,28 +169,42 @@ az storage account create \
   --name $STORAGE \
   --resource-group $RG \
   --location $LOCATION \
-  --sku Standard_LRS
+  --sku Standard_LRS \
+  --allow-blob-public-access false
 
+az functionapp create \
+  --name $APP \
+  --resource-group $RG \
+  --storage-account $STORAGE \
+  --flexconsumption-location $LOCATION \
+  --runtime python \
+  --runtime-version $PYVER
+
+echo "Function App: $APP"
+```
+
+<details>
+<summary>Classic Consumption instead (capped at Python 3.12)</summary>
+
+```bash
 az functionapp create \
   --name $APP \
   --resource-group $RG \
   --storage-account $STORAGE \
   --consumption-plan-location $LOCATION \
   --runtime python \
-  --runtime-version 3.11 \
+  --runtime-version 3.12 \
   --functions-version 4 \
   --os-type Linux
-
-echo "Function App: $APP"
 ```
+
+Available in more regions, but it cannot go past Python 3.12 and Microsoft
+documents a migration path away from it. Fine if Flex is not offered where you
+need to run.
+</details>
 
 This creates an Application Insights resource automatically — you need it for
 step 5.
-
-> **Flex Consumption** is the newer plan and uses different flags and a
-> different deployment mechanism. The commands above are for classic
-> Consumption. If you want Flex, check the current Microsoft documentation
-> rather than adapting these.
 
 **No table needs creating.** State lives in Azure Table Storage in the account
 above, reached through the `AzureWebJobsStorage` connection string the Function

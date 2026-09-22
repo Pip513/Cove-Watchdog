@@ -260,6 +260,42 @@ silent about devices is the only honest option.
 Config is validated before any API call — a stale profile name makes everything
 after it meaningless and costs a round trip to discover otherwise.
 
+#### `cove/state.py`
+Durable state between runs. The check is stateless in itself; state exists only
+to answer questions about *history* that no single run can - have we already
+told someone today, was this device failing last time, when did the outage
+start, has the weekly report gone out.
+
+Two backends behind one protocol: `JsonFileStateStore` for local runs and tests,
+`TableStorageStateStore` for Azure. The Azure SDK is imported **lazily**, so
+local runs and tests pull in no Azure dependency. Everything is stored as UTC.
+
+The file store writes to a temp file and `os.replace`s it, so an interrupted
+write cannot truncate state. A corrupt state file logs and starts empty rather
+than crashing - losing state costs one duplicate alert, refusing to run costs
+you the monitoring.
+
+Table Storage defers writes to `commit()` and touches only changed entities, so
+an hourly run over a healthy fleet costs one query and no writes.
+
+#### `cove/dispatch.py`
+Compares what is true now against what was true last run, and produces the
+messages that follow. Every cadence rule lives here and is testable without a
+mail server or an API.
+
+`plan()` decides and reads state; `commit()` records. They are separate so that
+a send failure does not mark a message as delivered.
+
+#### `cove/deliver.py`
+Renders a plan into messages and sends them. `plan_for_delivered()` reduces a
+plan to what actually sent, so an undelivered alert is retried next run instead
+of being remembered as delivered. One failed recipient does not stop the rest of
+the batch.
+
+Above `max_emails_per_run`, individual alerts collapse into one summary naming
+every device. A site-wide outage - or a bug here - should not open a hundred
+tickets.
+
 ### Scripts
 
 All are read-only against Cove. **None of them send email unless explicitly
@@ -294,6 +330,20 @@ python check_backups.py --report   # also render the weekly report
 Also flags monitored devices not on an hourly profile — a server nobody
 configured for hourly backups is its own silent problem.
 
+#### `run_watchdog.py`
+The watchdog itself: one complete run. `function_app.py` calls its `execute()`,
+so the hosted and local paths cannot drift.
+
+Defaults to a dry run - prints what it would send, writes no state. `--send` is
+required to deliver anything, so an accidental invocation mails nobody.
+
+Note that a dry run deliberately persists nothing, so you cannot rehearse the
+multi-day cadence by running it repeatedly. `test_dispatch.py` covers that.
+
+#### `function_app.py`
+The Azure Functions host. Thin by design. See **The host adapter** under
+Deployment for when it raises and why.
+
 #### `preview_emails.py`
 Prints every email variant with synthetic data. No SMTP settings needed. Use it
 to check wording before anything fires for real.
@@ -318,9 +368,14 @@ these do.
 39 cases covering failure classification, alert suppression, failure-email
 suppression and content, `run_check` never raising, and SMTP config validation.
 
-Run both:
+#### `test_dispatch.py`
+67 cases covering the cadence, rendering, partial delivery and both state
+backends. Consecutive runs are simulated against a real store rather than
+asserting on a single call, because the rules that matter are about sequences.
+
+Run all three:
 ```
-python test_detection.py && python test_failures.py
+python test_detection.py && python test_failures.py && python test_dispatch.py
 ```
 
 ### Other files
@@ -328,9 +383,14 @@ python test_detection.py && python test_failures.py
 - **`.env.example`** — annotated configuration template; doubles as setup docs.
 - **`.gitignore`** — `.env` is ignored. Verify with `git check-ignore -v .env`
   after any change.
-- **`requirements.txt`** — `requests`, `python-dotenv`, and `tzdata`. The last
-  is required on Windows, which ships no system timezone database; without it
-  `zoneinfo` fails and times silently fall back to UTC.
+- **`requirements.txt`** — `azure-functions`, `requests`, `python-dotenv`,
+  `tzdata`, and the Azure Table/identity SDKs. `tzdata` is required on Windows,
+  which ships no system timezone database; without it `zoneinfo` fails and
+  times silently fall back to UTC.
+- **`host.json` / `.funcignore`** — Functions host configuration, and what to
+  keep out of the deployment package (tests, exploration scripts, secrets,
+  local state).
+- **`LICENSE`** — MIT.
 
 ---
 
@@ -439,32 +499,31 @@ name, `I78` active data sources, `I81` physical/virtual.
 | 1. API exploration | Done |
 | 2. Detection | Done, per data source |
 | 3. Email transport and content | Done |
-| 4. State store and alert cadence | **Not built** |
-| 5. Scheduled deployment | **Not built** |
+| 4. State store and alert cadence | Done |
+| 5. Azure Functions host | Done, awaiting a first real deployment |
 
-### What Phase 4 must add
+### Cadence, now that state exists
 
-Everything else is built around it: `last_sent` is already threaded through
-`is_report_due()` and `should_send_failure()`, and is currently passed `None`.
-Until a state store exists:
+- First detection alerts immediately, on whichever run catches it.
+- A still-failing device alerts once a day at `WATCHDOG_REALERT_HOUR`, so the
+  repeat lands at a predictable time rather than whenever the outage ticks over.
+- A failure that **spreads** to another data source alerts at once: the scope of
+  the problem has changed, so it is new information. A source recovering while
+  others still fail stays silent.
+- Recovery sends one all-clear, then nothing.
+- A muted or deleted device is forgotten **silently**. It was not fixed, so
+  claiming it recovered would be a lie, and an open ticket is the correct signal
+  that a human should look.
+- A failed run touches no device state at all. Treating "no devices returned" as
+  "everything recovered" would clear every record during an API outage and
+  re-alert the whole fleet afterwards.
 
-- Alerts would repeat every run instead of following the intended cadence
-  (once on detection, then daily at a fixed hour until cleared).
-- Recovery emails cannot be sent, since nothing records that a device *was*
-  alerting.
-- The weekly report would send on every run during its hour.
-- Failure emails would repeat hourly rather than daily.
-
-The required state is small: per device, a first-detected timestamp, a
-last-alerted timestamp and a current state; plus a last-sent timestamp for the
-report and for failures. Any durable key-value store will do.
-
----
+A week-long outage on one device produces 8 emails, not 168.
 
 ## Deployment
 
-Nothing here is built yet. This section records the intended target and the
-decisions behind it, so whoever picks it up does not have to re-derive them.
+Built and committed; not yet deployed anywhere. `README.md` has the
+step-by-step. This section records the reasoning behind the choices.
 
 ### What any host must provide
 
@@ -497,15 +556,20 @@ Chosen over the alternatives for a small, stateless, scheduled job:
 At this volume the Consumption plan's free grant covers it; expect to pay only
 for the backing storage account.
 
-### What Phase 5 needs to add
+### The host adapter
 
-Not present in the repo:
+`function_app.py` is a timer trigger that calls `run_watchdog.execute()`, so
+the hosted and local paths cannot drift. `host.json` configures the host;
+`local.settings.json` (gitignored) holds local secrets.
 
-- **`function_app.py`** — a timer trigger calling `run_check()`, then dispatching
-  alerts, the report and failure emails according to the state store.
-- **`host.json`** — Functions host configuration.
-- **`local.settings.json`** — local development settings. **Must be gitignored**
-  (it already is), because it holds the same secrets as `.env`.
+**When it raises matters**, because that is what an Application Insights
+failure alert sees:
+
+- check failed but a failure email went out -> does **not** raise. The system
+  worked; a human was told. Raising would make a Cove outage look like a
+  defect here and alert on something already reported.
+- could not notify anyone -> **raises**. This is the case nobody would
+  otherwise discover.
 
 A timer trigger for hourly, in Azure's six-field NCRONTAB
 (`{second} {minute} {hour} {day} {month} {day-of-week}`):
@@ -528,6 +592,14 @@ Run the timer hourly in UTC and let the application reason about local time.
 **Port 25 is blocked outbound** on most Azure compute. Use 587 with STARTTLS, or
 2525. `cove/notify.py` says so explicitly in the error when a connection on port
 25 fails, but it is better not to hit it.
+
+**Python version decides the hosting plan.** Functions supports Python 3.10-3.14,
+but the classic Linux Consumption plan stops at 3.12 - newer versions go only to
+Flex Consumption, which is where Microsoft is investing. Prefer Flex. Avoid 3.10
+(support ends October 2026), and prefer 3.12 over 3.11 even on classic
+Consumption for a year more runway. Documentation pages disagree about which
+versions Flex accepts, so check `az functionapp list-runtimes --os linux` rather
+than trusting any of them.
 
 **Keep `tzdata` in requirements.** Linux hosts usually ship a timezone database
 and Windows never does. Including it costs nothing and removes a
@@ -565,7 +637,7 @@ comfortable silence.
 
 ## Working on this
 
-- **Run both test suites before and after any change.** They encode failure
+- **Run all three test suites before and after any change.** They encode failure
   modes that are not obvious from reading the code, and several exist because
   the naive version was wrong in a way that would have been silent.
 - **Never introduce `D09`** into evaluation, however convenient one call looks.
