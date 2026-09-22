@@ -1,0 +1,97 @@
+# Creates any missing Function App settings on every push to main.
+#
+# Deliberately separate from the deployment workflow Azure generates. Azure
+# rewrites that file whenever the Deployment Center is reconfigured, which
+# would silently drop a step added to it. This one is ours and stays put.
+#
+# It only ADDS settings that do not already exist, so it is safe to run on
+# every push: a threshold tuned in the portal is never reset. When a new
+# setting is added to the script, the next push creates it.
+#
+# Secrets are created empty and are never passed in here. They are filled in
+# the Azure portal or pointed at Key Vault, so no Cove token or SMTP password
+# ever exists in GitHub.
+#
+# ---------------------------------------------------------------------------
+# One-time setup, in the repository that deploys (Settings > Secrets and
+# variables > Actions):
+#
+#   Secrets                    where to find it
+#   AZURE_CLIENT_ID            Client ID of the user-assigned managed identity
+#                              Azure created for deployment
+#   AZURE_TENANT_ID            same identity, Tenant ID
+#   AZURE_SUBSCRIPTION_ID      the subscription holding the Function App
+#
+#   Variables
+#   AZURE_FUNCTIONAPP_NAME     the Function App name
+#   AZURE_RESOURCE_GROUP       its resource group
+#
+# Azure's generated workflow already holds the same three IDs under names with
+# a random suffix (AZUREAPPSERVICE_CLIENTID_...); copying those values is
+# fine. No new federated credential is needed - the existing one trusts any
+# workflow on this branch.
+# ---------------------------------------------------------------------------
+
+name: Configure Function App settings
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Required for OIDC. No stored credential.
+permissions:
+  id-token: write
+  contents: read
+
+concurrency:
+  group: configure-settings-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  configure:
+    name: Create missing app settings
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Verify configuration is present
+        env:
+          APP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
+          RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+        run: |
+          missing=""
+          [ -z "$APP_NAME" ]       && missing="$missing AZURE_FUNCTIONAPP_NAME(var)"
+          [ -z "$RESOURCE_GROUP" ] && missing="$missing AZURE_RESOURCE_GROUP(var)"
+          [ -z "$CLIENT_ID" ]      && missing="$missing AZURE_CLIENT_ID(secret)"
+          if [ -n "$missing" ]; then
+            echo "::error::Not configured yet. Missing:$missing"
+            echo "See the comment at the top of this workflow file for where to find each value."
+            exit 1
+          fi
+          echo "Target: $APP_NAME in $RESOURCE_GROUP"
+
+      - name: Sign in to Azure
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Create missing settings
+        shell: pwsh
+        run: |
+          ./scripts/setup-app-settings.ps1 `
+            -AppName "${{ vars.AZURE_FUNCTIONAPP_NAME }}" `
+            -ResourceGroup "${{ vars.AZURE_RESOURCE_GROUP }}"
+
+          # Exit 2 means the settings exist but a required one is still blank.
+          # That is a job for a human in the portal, not a broken pipeline, so
+          # surface it as a warning rather than failing every run until then.
+          if ($LASTEXITCODE -eq 2) {
+            Write-Output "::warning::Some required settings are still blank. The watchdog will not run until they are filled in the Azure portal."
+            exit 0
+          }
+          exit $LASTEXITCODE
