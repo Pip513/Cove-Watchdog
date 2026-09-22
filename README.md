@@ -220,10 +220,11 @@ App already has, and the table is created on first use.
 
 ### 2. Configure application settings
 
-**Six settings.** Everything else has a default in the code, so nothing else
-needs to exist in Azure for the watchdog to work.
+**Six settings need a value from you.** The rest have defaults in the code,
+and the section below makes all thirty appear in the portal automatically so
+they are there to adjust.
 
-In the portal: **Function App → Settings → Environment variables → Add**
+In the portal: **Function App → Settings → Environment variables**
 
 | Setting | |
 |---|---|
@@ -253,24 +254,40 @@ WATCHDOG_TIMEZONE           America/New_York
 SMTP_PORT                   587
 ```
 
-#### Optional: pre-create them all
+#### Making every setting appear automatically
 
-To see the full tunable surface in the portal rather than having to know a
-setting exists before you can change it:
+So the full tunable surface is visible in the portal without anyone typing
+thirty names, add two lines to the deployment workflow Azure generated in your
+repository (`.github/workflows/<app-name>.yml`), immediately after its
+`azure/login` step:
+
+```yaml
+      - name: Configure Cove Watchdog settings
+        uses: ./.github/actions/configure-settings
+        with:
+          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
+          resource-group: <your-resource-group>
+```
+
+That is the only edit. It reuses the Azure session that workflow already
+establishes, so **there are no secrets to add and nothing to configure** — the
+Deployment Center set all of that up when it wired the repository.
+
+From then on every deploy creates any setting that does not yet exist. It never
+overwrites, so a value you tune in the portal survives, and a setting added to
+this project later appears on your next sync.
+
+The logic lives in `.github/actions/configure-settings/`, so it is version
+controlled here and updates reach you by syncing. Only the two-line hook sits
+in Azure's generated file — worth knowing because Azure rewrites that file if
+you reconfigure the Deployment Center, and the hook would need re-adding.
+
+**Or run it by hand**, any time:
 
 ```bash
 pwsh scripts/setup-app-settings.ps1 -AppName "<app>" -ResourceGroup "<rg>"
 pwsh scripts/setup-app-settings.ps1 -OutputJson     # no Azure CLI needed
 ```
-
-It only adds what is missing, so a value you tuned is never reset.
-
-`.github/workflows/configure-settings.yml` does the same on every push, but is
-**off unless you set it up** — it needs `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`
-and `AZURE_SUBSCRIPTION_ID` as secrets plus `AZURE_FUNCTIONAPP_NAME` and
-`AZURE_RESOURCE_GROUP` as variables. Unconfigured it skips quietly. Worth
-enabling only if several people will tune settings and you want them
-discoverable; skip it otherwise.
 
 > **Do not set `WEBSITE_TIME_ZONE`.** The timer runs in UTC on purpose; the
 > application converts to local time itself using `WATCHDOG_TIMEZONE` to decide
