@@ -1,21 +1,73 @@
-# Secrets - never commit
+# ---------------------------------------------------------------------------
+# Secrets. Nothing below this line should ever reach a remote.
+# ---------------------------------------------------------------------------
+# Covers .env, .env.local, .env.production, .env.bak, prod.env and friends.
+# The negation must stay AFTER the patterns or the template gets ignored too.
 .env
+.env.*
 *.env
 !.env.example
 
+# Azure Functions local settings - holds the same secrets as .env
+local.settings.json
+
+# Azure CLI local state
+.azure/
+
+# Per-machine Claude Code settings. Usually covered by a global gitignore, but
+# that lives outside the repo and will not follow a fork. It can contain local
+# filesystem paths, so ignore it here too. A shared .claude/settings.json is
+# deliberately still committable.
+.claude/settings.local.json
+
+# ---------------------------------------------------------------------------
+# Local run state
+# ---------------------------------------------------------------------------
+# Contains device account IDs and hostnames, so it is mildly identifying.
+# If you point WATCHDOG_STATE_PATH somewhere else, add that path here too.
+watchdog_state*.json
+watchdog_state*.json.tmp
+
+# ---------------------------------------------------------------------------
 # Python
+# ---------------------------------------------------------------------------
 __pycache__/
 *.py[cod]
+*$py.class
 .venv/
 venv/
+env/
 *.egg-info/
+dist/
+build/
+.python-version
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 
-# Azure Functions (later phases)
-local.settings.json
+# ---------------------------------------------------------------------------
+# Azure Functions build artefacts
+# ---------------------------------------------------------------------------
 bin/
 obj/
+.func/
+*.zip
 
+# ---------------------------------------------------------------------------
+# Editors and operating systems
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+*.swp
+*~
+.DS_Store
+Thumbs.db
+desktop.ini
 
-# Local state (the Function uses Table Storage instead)
-watchdog_state.json
-watchdog_state.json.tmp
+# ---------------------------------------------------------------------------
+# Logs and scratch
+# ---------------------------------------------------------------------------
+*.log
+*.tmp
