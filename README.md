@@ -220,65 +220,57 @@ App already has, and the table is created on first use.
 
 ### 2. Configure application settings
 
-There are thirty of them. Eighteen arrive with working defaults, so only a
-handful need you.
+**Six settings.** Everything else has a default in the code, so nothing else
+needs to exist in Azure for the watchdog to work.
 
-**Automatically, on every push** — `.github/workflows/configure-settings.yml`
-creates any setting that does not already exist. It never overwrites, so a
-value you tune in the portal survives; and when a new setting is added to the
-project, the next push creates it.
+In the portal: **Function App → Settings → Environment variables → Add**
 
-One-time setup in the repository that deploys, under
-**Settings → Secrets and variables → Actions**:
+| Setting | |
+|---|---|
+| `COVE_PARTNER` | Console name **including** any parenthesised email |
+| `COVE_USERNAME` | The API user's login name |
+| `COVE_PASSWORD` | The token, shown once at creation |
+| `SMTP_HOST` | Your mail host |
+| `ALERT_FROM` | Sender your provider allows |
+| `ALERT_TO` | Where alerts go; comma-separated |
 
-| | Name | Where to find it |
-|---|---|---|
-| Secret | `AZURE_CLIENT_ID` | Client ID of the managed identity Azure created for deployment |
-| Secret | `AZURE_TENANT_ID` | Same identity, Tenant ID |
-| Secret | `AZURE_SUBSCRIPTION_ID` | The subscription holding the Function App |
-| Variable | `AZURE_FUNCTIONAPP_NAME` | The Function App name |
-| Variable | `AZURE_RESOURCE_GROUP` | Its resource group |
-
-If Azure's Deployment Center already wired up your repository, it created the
-same three IDs as secrets with a random suffix
-(`AZUREAPPSERVICE_CLIENTID_…`) — copy those values across. **No new federated
-credential is needed**; the existing one trusts any workflow on the branch.
-
-This is deliberately a separate workflow from the one Azure generates, because
-Azure rewrites its own file whenever the Deployment Center is reconfigured and
-would silently drop a step added to it.
-
-**Or by hand**, if you would rather not wait for a push:
-
-```bash
-pwsh scripts/setup-app-settings.ps1 -AppName "<app>" -ResourceGroup "<rg>"
-pwsh scripts/setup-app-settings.ps1 -WhatIf                # preview only
-pwsh scripts/setup-app-settings.ps1 -OutputJson            # no Azure CLI needed
-```
-
-`-OutputJson` prints the settings as portal **Advanced edit** JSON for
-**Environment variables**. It begins with a comma so the block appends to the
-existing array — Advanced edit replaces everything you paste over, and
-`AzureWebJobsStorage`, `APPLICATIONINSIGHTS_CONNECTION_STRING` and
-`DEPLOYMENT_STORAGE_CONNECTION_STRING` must survive or the app breaks.
-
-#### The six you must fill yourself
-
-```
-COVE_PARTNER  COVE_USERNAME  COVE_PASSWORD
-SMTP_HOST     ALERT_FROM     ALERT_TO
-```
-
-The two secrets are created **blank on purpose** and never pass through CI, so
-no Cove token or SMTP password exists in GitHub. Fill them in the portal, or
-point them at Key Vault:
-
-```
-@Microsoft.KeyVault(SecretUri=https://<vault>.vault.azure.net/secrets/<name>/)
-```
+That is the whole required setup. Nothing can automate it — a Cove token and
+an SMTP host are values only you have.
 
 Until all six have values, **every run fails loudly**. That is the design
 refusing to look healthy while it is inert, not a broken deployment.
+
+#### Changing a default
+
+Anything in the [configuration reference](#configuration) can be overridden by
+adding it as a setting. Common ones:
+
+```
+WATCHDOG_THRESHOLD_HOURS    4        hours before a data source counts as missed
+WATCHDOG_MONITOR_PROFILE             profile names to watch; blank = all servers
+WATCHDOG_IGNORE_PROFILE              profiles to mute
+WATCHDOG_TIMEZONE           America/New_York
+SMTP_PORT                   587
+```
+
+#### Optional: pre-create them all
+
+To see the full tunable surface in the portal rather than having to know a
+setting exists before you can change it:
+
+```bash
+pwsh scripts/setup-app-settings.ps1 -AppName "<app>" -ResourceGroup "<rg>"
+pwsh scripts/setup-app-settings.ps1 -OutputJson     # no Azure CLI needed
+```
+
+It only adds what is missing, so a value you tuned is never reset.
+
+`.github/workflows/configure-settings.yml` does the same on every push, but is
+**off unless you set it up** — it needs `AZURE_CLIENT_ID`, `AZURE_TENANT_ID`
+and `AZURE_SUBSCRIPTION_ID` as secrets plus `AZURE_FUNCTIONAPP_NAME` and
+`AZURE_RESOURCE_GROUP` as variables. Unconfigured it skips quietly. Worth
+enabling only if several people will tune settings and you want them
+discoverable; skip it otherwise.
 
 > **Do not set `WEBSITE_TIME_ZONE`.** The timer runs in UTC on purpose; the
 > application converts to local time itself using `WATCHDOG_TIMEZONE` to decide

@@ -1,4 +1,13 @@
-# Creates any missing Function App settings on every push to main.
+# OPTIONAL. Pre-creates the Function App settings that have defaults, so the
+# whole tunable surface is visible in the portal instead of being invisible
+# until someone reads the README.
+#
+# The watchdog does NOT need this. It reads only six settings it cannot
+# default - the Cove partner, username and token, the SMTP host, and the from
+# and to addresses - and those are values only a human can supply, in the
+# portal, once. Everything else falls back to a value in the code.
+#
+# Unconfigured, this skips quietly. Nothing is broken.
 #
 # Deliberately separate from the deployment workflow Azure generates. Azure
 # rewrites that file whenever the Deployment Center is reconfigured, which
@@ -56,24 +65,27 @@ jobs:
       - name: Check out
         uses: actions/checkout@v4
 
-      - name: Verify configuration is present
+      # This workflow is OPTIONAL. The watchdog reads only six settings it
+      # cannot default; everything else falls back to a value in the code. So
+      # a repository that has not set the values below is not broken, and this
+      # skips quietly rather than turning the pipeline red forever.
+      - name: Is this configured?
+        id: check
         env:
           APP_NAME: ${{ vars.AZURE_FUNCTIONAPP_NAME }}
           RESOURCE_GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
           CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
         run: |
-          missing=""
-          [ -z "$APP_NAME" ]       && missing="$missing AZURE_FUNCTIONAPP_NAME(var)"
-          [ -z "$RESOURCE_GROUP" ] && missing="$missing AZURE_RESOURCE_GROUP(var)"
-          [ -z "$CLIENT_ID" ]      && missing="$missing AZURE_CLIENT_ID(secret)"
-          if [ -n "$missing" ]; then
-            echo "::error::Not configured yet. Missing:$missing"
-            echo "See the comment at the top of this workflow file for where to find each value."
-            exit 1
+          if [ -z "$APP_NAME" ] || [ -z "$RESOURCE_GROUP" ] || [ -z "$CLIENT_ID" ]; then
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::Skipped. This only pre-creates the optional settings so they are visible in the portal; the watchdog does not need them. See the comment at the top of this file to enable it."
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+            echo "Target: $APP_NAME in $RESOURCE_GROUP"
           fi
-          echo "Target: $APP_NAME in $RESOURCE_GROUP"
 
       - name: Sign in to Azure
+        if: steps.check.outputs.configured == 'true'
         uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID }}
@@ -81,6 +93,7 @@ jobs:
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
       - name: Create missing settings
+        if: steps.check.outputs.configured == 'true'
         shell: pwsh
         run: |
           ./scripts/setup-app-settings.ps1 `
