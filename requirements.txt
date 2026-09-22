@@ -1,0 +1,5 @@
+requests>=2.32.0
+python-dotenv>=1.0.0
+# Windows has no system timezone database; zoneinfo needs this. Harmless
+# elsewhere, and it keeps the daily re-alert time correct on any platform.
+tzdata>=2024.1
