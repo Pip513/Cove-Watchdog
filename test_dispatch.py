@@ -439,6 +439,109 @@ try:
 finally:
     deliver_module.send = _real_send
 
+print("\nTable Storage backend\n")
+
+from cove.state import TableStorageStateStore  # noqa: E402
+
+
+class FakeTable:
+    """Stands in for a TableClient, recording every call."""
+
+    def __init__(self, rows=None):
+        self.rows = dict(rows or {})
+        self.upserts = 0
+        self.deletes = 0
+
+    def list_entities(self):
+        return list(self.rows.values())
+
+    def upsert_entity(self, entity):
+        self.upserts += 1
+        self.rows[(entity["PartitionKey"], entity["RowKey"])] = dict(entity)
+
+    def delete_entity(self, partition, row):
+        self.deletes += 1
+        self.rows.pop((partition, row), None)
+
+
+def table_store(rows=None):
+    store = TableStorageStateStore(connection_string="fake")
+    fake = FakeTable(rows)
+    store._client = fake
+    return store, fake
+
+
+store, fake = table_store()
+now = at("2026-09-21 17:00")
+run(now, [device(now, ages=broken)], store)
+check("device state is written to the table", fake.upserts >= 1)
+
+reloaded, _ = table_store(fake.rows)
+state = reloaded.get_device(1)
+check("  and reads back", state is not None)
+check(
+    "  timestamps round-trip as UTC",
+    state is not None and state.last_alerted == at("2026-09-21 17:00"),
+    str(state.last_alerted if state else None),
+)
+check(
+    "  failing sources round-trip",
+    state is not None and state.failing_sources == ["D10"],
+    str(state.failing_sources if state else None),
+)
+
+now = at("2026-09-21 18:00")
+p = run(now, [device(now, ages=broken)], reloaded)
+check("  cadence honours state loaded from the table", len(p.alerts) == 0)
+
+# An unchanged run must not rewrite every row.
+store, fake = table_store()
+now = at("2026-09-21 17:00")
+run(now, [device(now, ages=broken)], store)
+writes_after_alert = fake.upserts
+store._dirty_devices.clear()
+store._dirty_meta.clear()
+store.commit()
+check(
+    "committing with nothing dirty writes nothing",
+    fake.upserts == writes_after_alert,
+    f"{fake.upserts} vs {writes_after_alert}",
+)
+
+# Recovery must remove the row, not leave a stale one.
+store, fake = table_store()
+now = at("2026-09-21 17:00")
+run(now, [device(now, ages=broken)], store)
+now = at("2026-09-21 19:00")
+run(now, [device(now, ages={"D01": 0.5, "D10": 0.5})], store)
+check("recovery deletes the row", fake.deletes >= 1)
+check("  and it is gone from the table", not any(k[0] == "device" for k in fake.rows))
+
+# Devices and meta must not collide.
+store, fake = table_store()
+weekly = ReportConfig(enabled=True, day="monday", hour=8)
+now = at("2026-09-21 08:00")
+run(now, [device(now, ages=broken)], store, report=weekly)
+partitions = {k[0] for k in fake.rows}
+check("devices and meta use separate partitions", partitions == {"device", "meta"}, str(partitions))
+
+# A malformed row must not take down the run.
+bad_rows = {
+    ("device", "junk"): {"PartitionKey": "device", "RowKey": "junk"},
+    ("device", "2"): {
+        "PartitionKey": "device", "RowKey": "2",
+        "first_detected": at("2026-09-21 17:00").isoformat(),
+        "last_alerted": at("2026-09-21 17:00").isoformat(),
+        "failing_sources": '["D01"]', "label": "SERVER2",
+    },
+}
+store, _ = table_store(bad_rows)
+check(
+    "a malformed row is discarded without losing the good ones",
+    store.get_device(2) is not None and len(store.all_devices()) == 1,
+    f"{len(store.all_devices())} loaded",
+)
+
 print()
 if _failures:
     print(f"{len(_failures)} FAILED: {', '.join(_failures)}")
