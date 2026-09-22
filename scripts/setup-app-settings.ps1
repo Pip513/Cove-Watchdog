@@ -20,16 +20,19 @@
 param(
     [string]$AppName       = $env:AZURE_FUNCTIONAPP_APP_NAME,
     [string]$ResourceGroup = $env:AZURE_RESOURCE_GROUP,
-    [switch]$WhatIf
+    [switch]$WhatIf,
+    # Print the settings as portal "Advanced edit" JSON and exit. Needs no
+    # Azure CLI and no login - useful when az is not installed.
+    [switch]$OutputJson
 )
 
 $ErrorActionPreference = "Stop"
 
-if (-not $AppName) {
+if (-not $OutputJson -and -not $AppName) {
     Write-Error "AppName is required. Pass -AppName or set AZURE_FUNCTIONAPP_APP_NAME."
     exit 1
 }
-if (-not $ResourceGroup) {
+if (-not $OutputJson -and -not $ResourceGroup) {
     Write-Error "ResourceGroup is required. Pass -ResourceGroup or set AZURE_RESOURCE_GROUP."
     exit 1
 }
@@ -136,6 +139,33 @@ $settings = [ordered]@{
     # Azure NCRONTAB has SIX fields, seconds first. This is hourly, on the
     # hour, in UTC. Temporarily set "0 */5 * * * *" to test a deployment.
     "WATCHDOG_SCHEDULE"           = "0 0 * * * *"
+}
+
+# --- JSON output, for the portal when Azure CLI is not available ---------
+if ($OutputJson) {
+    $payload = foreach ($key in $settings.Keys) {
+        [ordered]@{ name = $key; value = $settings[$key]; slotSetting = $false }
+    }
+    # Guidance goes to stderr so stdout is pure JSON and
+    #   ./setup-app-settings.ps1 -OutputJson > settings.json
+    # produces a file you can paste straight in.
+    $err = [Console]::Error
+    $err.WriteLine("")
+    $err.WriteLine("Function App > Settings > Environment variables > Advanced edit")
+    $err.WriteLine("")
+    $err.WriteLine("WARNING: Advanced edit REPLACES every setting with what you paste.")
+    $err.WriteLine("Copy the existing JSON out first and keep these three, or the app breaks:")
+    $err.WriteLine("  AzureWebJobsStorage")
+    $err.WriteLine("  APPLICATIONINSIGHTS_CONNECTION_STRING")
+    $err.WriteLine("  DEPLOYMENT_STORAGE_CONNECTION_STRING")
+    $err.WriteLine("")
+    $err.WriteLine("Paste the block below INSIDE the existing array, alongside those.")
+    $err.WriteLine("")
+    # Trim the outer brackets so it drops into an existing array cleanly.
+    $json = $payload | ConvertTo-Json -Depth 3
+    $inner = ($json -split "`n" | Select-Object -Skip 1 | Select-Object -SkipLast 1) -join "`n"
+    Write-Output ("," + $inner)
+    exit 0
 }
 
 Write-Host "Function App : $AppName"
