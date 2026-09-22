@@ -593,13 +593,18 @@ Run the timer hourly in UTC and let the application reason about local time.
 2525. `cove/notify.py` says so explicitly in the error when a connection on port
 25 fails, but it is better not to hit it.
 
-**Python version decides the hosting plan.** Functions supports Python 3.10-3.14,
-but the classic Linux Consumption plan stops at 3.12 - newer versions go only to
-Flex Consumption, which is where Microsoft is investing. Prefer Flex. Avoid 3.10
-(support ends October 2026), and prefer 3.12 over 3.11 even on classic
-Consumption for a year more runway. Documentation pages disagree about which
-versions Flex accepts, so check `az functionapp list-runtimes --os linux` rather
-than trusting any of them.
+**Python version decides the hosting plan.** This targets **3.14 on Flex
+Consumption**, chosen for the support runway (April 2029) on something meant to
+be set up once and left alone. Functions supports 3.10-3.14, but the classic
+Linux Consumption plan stops at 3.12 - newer versions go only to Flex, which is
+where Microsoft is investing.
+
+The code itself uses no syntax past 3.10, so it runs across the whole supported
+range; only the hosting plan constrains the choice. Verified on 3.14 with both
+deprecation warnings escalated to errors.
+
+Microsoft's own pages disagree about which versions Flex accepts, so check
+`az functionapp list-runtimes --os linux` rather than trusting any of them.
 
 **Keep `tzdata` in requirements.** Linux hosts usually ship a timezone database
 and Windows never does. Including it costs nothing and removes a

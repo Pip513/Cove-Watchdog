@@ -38,7 +38,7 @@ That gap is the main reason this exists.
 ## Requirements
 
 - An N-able Cove account and permission to create an API user
-- Python **3.11 or 3.12** (see the version note under Deploy)
+- Python **3.14** (3.10+ works; see the version note under Deploy)
 - An SMTP host — a provider or an internal relay
 - For deployment: an Azure subscription and Contributor rights
 
@@ -109,23 +109,31 @@ delivery without waiting for a real failure or mailing about a healthy machine.
 
 ### Python version, and why it decides your hosting plan
 
-Azure Functions supports Python 3.10 through 3.14, all GA. **But the classic
-Linux Consumption plan stops at 3.12** — newer versions are only added to Flex
-Consumption, and Microsoft is steering Consumption apps toward Flex.
+**This targets Python 3.14 on a Flex Consumption plan.** That combination has
+the longest support runway of any current option — 3.14 is supported until
+April 2029 — which suits a monitoring tool you want to set up once and leave
+alone.
 
-So the version you want determines the plan you create:
+Azure Functions supports 3.10 through 3.14, all GA, but **the classic Linux
+Consumption plan stops at 3.12**. Newer versions are only added to Flex
+Consumption, and Microsoft is steering Consumption apps toward Flex. So the
+version you want decides the plan you create:
 
-| Want | Plan | Note |
+| Want | Plan | End of support |
 |---|---|---|
-| 3.13 or 3.14 | **Flex Consumption** | Where Microsoft is investing. Limited regions |
-| 3.12 or lower | Either | Classic Consumption is capped here |
+| **3.14** | **Flex Consumption** | April 2029 |
+| 3.13 | Flex Consumption | October 2029 |
+| 3.12 | Either | October 2028 |
+| 3.11 | Either | October 2027 |
+| 3.10 | Either | **October 2026** — avoid |
 
-Avoid 3.10 — its support ends October 2026. Prefer 3.12 over 3.11 even on
-classic Consumption: a year more runway for no extra effort.
+Nothing in this project uses syntax past 3.10, so it runs across that whole
+range if you need a different version. It is verified on 3.14: the test suites
+pass with deprecation warnings escalated to errors, and every dependency
+imports cleanly.
 
-**Match your local version to the deployed one.** Nothing in this project uses
-syntax past 3.10, so it runs anywhere in that range, but if they differ you are
-not testing what you ship.
+**Match your local version to the deployed one.** If they differ you are not
+testing what you ship.
 
 Documentation pages disagree about which versions Flex accepts, so **ask your
 own subscription rather than trusting any doc, including this one**:
@@ -161,7 +169,7 @@ RG=rg-cove-watchdog
 LOCATION=eastus          # must appear in the list above
 STORAGE=covewatchdogsa$RANDOM
 APP=cove-watchdog-$RANDOM
-PYVER=3.12               # confirm with list-runtimes first
+PYVER=3.14               # confirm with list-runtimes first
 
 az group create --name $RG --location $LOCATION
 

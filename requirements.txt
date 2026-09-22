@@ -1,12 +1,19 @@
 # Runtime dependencies. Azure Functions installs these during deployment.
-azure-functions>=1.21.0
-requests>=2.32.0
-python-dotenv>=1.0.0
+#
+# Floors are the versions this was actually verified against on Python 3.14;
+# upper bounds block major releases, so a breaking change upstream cannot reach
+# a deployed watchdog without someone choosing it.
+
+azure-functions>=2.3.0,<3
+requests>=2.32.0,<3
+python-dotenv>=1.0.0,<2
+
 # Windows ships no system timezone database, so zoneinfo needs this. Without
-# it every timestamp silently falls back to UTC and the daily re-alert fires
-# at the wrong hour.
+# it every timestamp silently falls back to UTC and the daily re-alert fires at
+# the wrong hour. Harmless on Linux. Data only, so no upper bound.
 tzdata>=2024.1
-# State storage in Azure. Imported lazily, so local runs that use the JSON
-# file store never load it.
-azure-data-tables>=12.5.0
-azure-identity>=1.17.0
+
+# State storage in Azure. Imported lazily, so local runs that use the JSON file
+# store never load them.
+azure-data-tables>=12.5.0,<13
+azure-identity>=1.17.0,<2
