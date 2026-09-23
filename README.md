@@ -244,19 +244,23 @@ settings are separate. Everything else has a default in the code, so it only
 needs to exist in Azure if you want it visible and adjustable in the portal.
 Two ways to add the full set:
 
-**Portal, no tools needed.** Generate the JSON:
+**Portal, no tools needed.** Open
+[`azure-app-settings.txt`](azure-app-settings.txt). It holds every setting,
+with defaults filled in and the required ones blank. Then:
 
-```bash
-pwsh scripts/setup-app-settings.ps1 -OutputJson
-```
-
-Then **Function App → Settings → Environment variables → Advanced edit**, and
-paste the output inside the existing array, just before the closing `]`. It
-starts with a comma for exactly that reason.
+1. **Function App → Settings → Environment variables → Advanced edit**.
+2. Put the cursor just before the final `]` at the very end of the text.
+3. Paste everything below the file's `COPY BELOW THIS LINE` marker. The block
+   starts with a comma so it joins the list that is already there.
+4. **OK**, then **Apply**.
+5. Fill in the required values listed above, then **Apply** again.
 
 > **Advanced edit replaces everything.** Keep `AzureWebJobsStorage`,
 > `APPLICATIONINSIGHTS_CONNECTION_STRING` and
 > `DEPLOYMENT_STORAGE_CONNECTION_STRING` — losing them breaks the app.
+
+`pwsh scripts/setup-app-settings.ps1 -OutputJson` prints the same block, if
+you would rather generate it than copy it.
 
 **Azure CLI.** Adds only what is missing and never overwrites, so it is safe
 to re-run after pulling an update that introduces a new setting:

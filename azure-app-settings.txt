@@ -1,0 +1,72 @@
+Cove Watchdog - Azure Function App settings
+===========================================
+
+Adds every setting the watchdog reads to the Function App, so they are all
+visible and adjustable in the Azure portal.
+
+HOW TO USE
+  1. Azure portal > your Function App > Settings > Environment variables
+  2. Click "Advanced edit".
+  3. Put the cursor just before the final ] at the very end of the text.
+  4. Paste everything below the COPY BELOW THIS LINE marker.
+  5. Click OK, then Apply.
+  6. Fill in the REQUIRED values listed below, then Apply again.
+
+DO NOT DELETE the three settings already there. Advanced edit replaces
+everything, and the app breaks without them:
+  AzureWebJobsStorage
+  APPLICATIONINSIGHTS_CONNECTION_STRING
+  DEPLOYMENT_STORAGE_CONNECTION_STRING
+
+REQUIRED - the watchdog will not run until these have values:
+  COVE_PARTNER    Customer name exactly as the Cove console shows it, INCLUDING
+                  the parenthesised email:  Acme Ltd (admin@acme.com)
+  COVE_USERNAME   The API user's login name
+  COVE_PASSWORD   The API user's token (secret)
+  SMTP_HOST       Mail host only, no https:// and no port:  mail.smtp2go.com
+  ALERT_FROM      Sender address your mail provider allows
+  ALERT_TO        Recipient address(es), comma-separated
+
+USUALLY REQUIRED - most hosted mail providers need a login:
+  SMTP_USERNAME
+  SMTP_PASSWORD   (secret)
+
+Everything else already has a working default.
+
+Timezone: use a city name such as America/New_York. Never EST - it is
+accepted, but ignores daylight saving, so mail arrives an hour late all summer.
+
+Every setting and its accepted format: README.md, "Configuration".
+
+----------------------- COPY BELOW THIS LINE -----------------------
+,
+  { "name": "COVE_PARTNER",                "value": "", "slotSetting": false },
+  { "name": "COVE_USERNAME",               "value": "", "slotSetting": false },
+  { "name": "COVE_PASSWORD",               "value": "", "slotSetting": false },
+  { "name": "COVE_ENDPOINT",               "value": "https://api.backup.management/jsonapi", "slotSetting": false },
+  { "name": "WATCHDOG_THRESHOLD_HOURS",    "value": "4", "slotSetting": false },
+  { "name": "WATCHDOG_GRACE_HOURS",        "value": "24", "slotSetting": false },
+  { "name": "WATCHDOG_MONITOR_PROFILE",    "value": "", "slotSetting": false },
+  { "name": "WATCHDOG_IGNORE_PROFILE",     "value": "", "slotSetting": false },
+  { "name": "WATCHDOG_TIMEZONE",           "value": "America/New_York", "slotSetting": false },
+  { "name": "WATCHDOG_REALERT_HOUR",       "value": "8", "slotSetting": false },
+  { "name": "WATCHDOG_MAX_EMAILS_PER_RUN", "value": "25", "slotSetting": false },
+  { "name": "REPORT_ENABLED",              "value": "true", "slotSetting": false },
+  { "name": "REPORT_DAY",                  "value": "monday", "slotSetting": false },
+  { "name": "REPORT_HOUR",                 "value": "8", "slotSetting": false },
+  { "name": "REPORT_DEVICE_LIMIT",         "value": "5", "slotSetting": false },
+  { "name": "SMTP_HOST",                   "value": "", "slotSetting": false },
+  { "name": "SMTP_PORT",                   "value": "587", "slotSetting": false },
+  { "name": "SMTP_SECURITY",               "value": "starttls", "slotSetting": false },
+  { "name": "SMTP_USERNAME",               "value": "", "slotSetting": false },
+  { "name": "SMTP_PASSWORD",               "value": "", "slotSetting": false },
+  { "name": "SMTP_VERIFY_CERT",            "value": "true", "slotSetting": false },
+  { "name": "SMTP_TIMEOUT",                "value": "30", "slotSetting": false },
+  { "name": "ALERT_FROM",                  "value": "", "slotSetting": false },
+  { "name": "ALERT_FROM_NAME",             "value": "Cove Backup Watchdog", "slotSetting": false },
+  { "name": "ALERT_TO",                    "value": "", "slotSetting": false },
+  { "name": "ALERT_SUBJECT_PREFIX",        "value": "[Cove]", "slotSetting": false },
+  { "name": "WATCHDOG_TABLE_NAME",         "value": "covewatchdog", "slotSetting": false },
+  { "name": "WATCHDOG_TABLE_ACCOUNT_URL",  "value": "", "slotSetting": false },
+  { "name": "WATCHDOG_STATE_CONNECTION",   "value": "", "slotSetting": false },
+  { "name": "WATCHDOG_SCHEDULE",           "value": "0 0 * * * *", "slotSetting": false }
