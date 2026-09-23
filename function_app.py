@@ -14,12 +14,12 @@ year.
 from __future__ import annotations
 
 import logging
-import os
 from datetime import datetime, timezone
 
 import azure.functions as func
 
 from cove.detection import Config
+from cove.env import env_str
 from cove.errors import CoveConfigError
 from cove.notify import SmtpConfig
 from cove.report import ReportConfig
@@ -28,9 +28,15 @@ from run_watchdog import execute
 
 app = func.FunctionApp()
 
-# Hourly, on the hour. Azure NCRONTAB has six fields, seconds first - so this
-# is hourly, not "every minute" as the five-field cron equivalent would be.
-SCHEDULE = os.getenv("WATCHDOG_SCHEDULE", "0 0 * * * *")
+# Hourly, on the hour, in UTC. This is the six-field form of NCRONTAB, seconds
+# first; Azure also accepts five fields and tells them apart by counting. So
+# count carefully: "0 */5 * * * *" is every five minutes, "0 */5 * * *" every
+# five hours.
+#
+# Read at import, so a blank value here would once have left the timer with no
+# schedule and the Function would not have loaded at all. env_str applies the
+# default instead.
+SCHEDULE = env_str("WATCHDOG_SCHEDULE", "0 0 * * * *")
 
 
 @app.timer_trigger(

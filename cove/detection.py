@@ -8,13 +8,13 @@ dead for weeks. Per-source evaluation is the whole point.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from enum import Enum
 from zoneinfo import ZoneInfo
 
 from .devices import DatasourceStatus, Device
+from .env import env_float, env_int, env_str
 from .errors import CoveConfigError
 
 
@@ -82,13 +82,13 @@ class Config:
     @classmethod
     def from_env(cls) -> "Config":
         return cls(
-            threshold_hours=float(os.getenv("WATCHDOG_THRESHOLD_HOURS", "4")),
-            grace_hours=float(os.getenv("WATCHDOG_GRACE_HOURS", "24")),
-            monitor_profiles=_profile_list(os.getenv("WATCHDOG_MONITOR_PROFILE")),
-            ignore_profiles=_profile_list(os.getenv("WATCHDOG_IGNORE_PROFILE")),
-            display_timezone=os.getenv("WATCHDOG_TIMEZONE", "America/New_York"),
-            realert_hour=int(os.getenv("WATCHDOG_REALERT_HOUR", "8")),
-            max_emails_per_run=int(os.getenv("WATCHDOG_MAX_EMAILS_PER_RUN", "25")),
+            threshold_hours=env_float("WATCHDOG_THRESHOLD_HOURS", 4.0),
+            grace_hours=env_float("WATCHDOG_GRACE_HOURS", 24.0),
+            monitor_profiles=_profile_list(env_str("WATCHDOG_MONITOR_PROFILE")),
+            ignore_profiles=_profile_list(env_str("WATCHDOG_IGNORE_PROFILE")),
+            display_timezone=env_str("WATCHDOG_TIMEZONE", "America/New_York"),
+            realert_hour=env_int("WATCHDOG_REALERT_HOUR", 8),
+            max_emails_per_run=env_int("WATCHDOG_MAX_EMAILS_PER_RUN", 25),
         )
 
     def validate(self) -> None:

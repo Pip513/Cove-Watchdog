@@ -9,13 +9,13 @@ because those are exactly the things that differ between providers.
 from __future__ import annotations
 
 import logging
-import os
 import smtplib
 import ssl
 from dataclasses import dataclass, field
 from email.message import EmailMessage
 from email.utils import formataddr, formatdate, make_msgid
 
+from .env import env_bool, env_int, env_secret, env_str
 from .errors import CoveConfigError, CoveError
 
 log = logging.getLogger(__name__)
@@ -28,13 +28,6 @@ class EmailDeliveryError(CoveError):
 # Port 25 is blocked outbound on most Azure compute. 587 (STARTTLS) or 2525
 # are the usual choices; SMTP2GO accepts both.
 SECURITY_MODES = ("starttls", "ssl", "none")
-
-
-def _env_bool(name: str, default: bool) -> bool:
-    raw = os.getenv(name)
-    if raw is None or raw.strip() == "":
-        return default
-    return raw.strip().lower() in ("1", "true", "yes", "on")
 
 
 def _split_addresses(raw: str | None) -> list[str]:
@@ -54,8 +47,10 @@ class SmtpConfig:
     #: Leave blank for a relay that accepts unauthenticated mail.
     username: str = ""
     password: str = field(default="", repr=False)
-    #: Only disable for an internal relay with a self-signed certificate.
-    verify_cert: bool = True
+    #: Off by default: some relays present certificates that fail
+    #: verification. The connection is still encrypted, but the server is not
+    #: authenticated. Turn on for a provider with a valid certificate.
+    verify_cert: bool = False
     timeout: int = 30
 
     from_address: str = ""
@@ -66,17 +61,18 @@ class SmtpConfig:
     @classmethod
     def from_env(cls) -> "SmtpConfig":
         return cls(
-            host=os.getenv("SMTP_HOST", "").strip(),
-            port=int(os.getenv("SMTP_PORT", "587")),
-            security=os.getenv("SMTP_SECURITY", "starttls").strip().lower(),
-            username=os.getenv("SMTP_USERNAME", "").strip(),
-            password=os.getenv("SMTP_PASSWORD", ""),
-            verify_cert=_env_bool("SMTP_VERIFY_CERT", True),
-            timeout=int(os.getenv("SMTP_TIMEOUT", "30")),
-            from_address=os.getenv("ALERT_FROM", "").strip(),
-            from_name=os.getenv("ALERT_FROM_NAME", "Cove Backup Watchdog").strip(),
-            to_addresses=_split_addresses(os.getenv("ALERT_TO")),
-            subject_prefix=os.getenv("ALERT_SUBJECT_PREFIX", "[Cove]").strip(),
+            host=env_str("SMTP_HOST"),
+            port=env_int("SMTP_PORT", 587),
+            security=env_str("SMTP_SECURITY", "starttls").lower(),
+            username=env_str("SMTP_USERNAME"),
+            password=env_secret("SMTP_PASSWORD"),
+            verify_cert=env_bool("SMTP_VERIFY_CERT", False),
+            timeout=env_int("SMTP_TIMEOUT", 30),
+            from_address=env_str("ALERT_FROM"),
+            from_name=env_str("ALERT_FROM_NAME", "Cove Backup Watchdog"),
+            to_addresses=_split_addresses(env_str("ALERT_TO")),
+            # The one setting where blank is a real choice: no subject prefix.
+            subject_prefix=env_str("ALERT_SUBJECT_PREFIX", "[Cove]", blank_is_empty=True),
         )
 
     def validate(self) -> None:
@@ -132,8 +128,10 @@ def send(config: SmtpConfig, message: EmailMessage) -> None:
             # Only for an internal relay with a self-signed certificate.
             context.check_hostname = False
             context.verify_mode = ssl.CERT_NONE
-            log.warning(
-                "SMTP certificate verification is disabled (SMTP_VERIFY_CERT)."
+            # Info, not warning: off is the default, so a warning would fire
+            # on every run and train people to ignore warnings.
+            log.info(
+                "SMTP certificate verification is off (SMTP_VERIFY_CERT)."
             )
 
     try:

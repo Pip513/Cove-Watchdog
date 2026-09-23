@@ -10,17 +10,17 @@ Run:  python check_backups.py
 
 from __future__ import annotations
 
-import os
 import sys
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
 
 from dotenv import load_dotenv
 
-from cove import CoveClient, CoveCredentials, CoveError
+from cove import CoveClient, CoveError
 from cove.detection import Config, SkipReason, Verdict, evaluate_all, verify_scope
 from cove.devices import fetch_devices
 from cove.report import ReportConfig, is_report_due, report_body, report_subject
+from cove.runner import credentials_from_env
 
 
 def main(argv: list[str]) -> int:
@@ -36,12 +36,7 @@ def main(argv: list[str]) -> int:
         return 2
     now = datetime.now(tz=timezone.utc)
 
-    creds = CoveCredentials(
-        partner=os.getenv("COVE_PARTNER", ""),
-        username=os.getenv("COVE_USERNAME", ""),
-        password=os.getenv("COVE_PASSWORD", ""),
-        endpoint=os.getenv("COVE_ENDPOINT", "https://api.backup.management/jsonapi"),
-    )
+    creds = credentials_from_env()
 
     print(f"Missed-backup check (dry run) - {now.strftime('%Y-%m-%d %H:%M UTC')}")
     print(f"  threshold {config.threshold_hours:g}h | grace {config.grace_hours:g}h")

@@ -12,14 +12,14 @@ Run:  python explore_devices.py
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from cove import CoveClient, CoveCredentials, CoveError
+from cove import CoveClient, CoveError
+from cove.runner import credentials_from_env
 
 # Columns the watchdog needs, plus context for reading the output.
 COLUMNS: dict[str, str] = {
@@ -110,12 +110,7 @@ def fetch_all(client: CoveClient, partner_id: int) -> list[dict]:
 
 def main() -> int:
     load_dotenv()
-    creds = CoveCredentials(
-        partner=os.getenv("COVE_PARTNER", ""),
-        username=os.getenv("COVE_USERNAME", ""),
-        password=os.getenv("COVE_PASSWORD", ""),
-        endpoint=os.getenv("COVE_ENDPOINT", "https://api.backup.management/jsonapi"),
-    )
+    creds = credentials_from_env()
 
     try:
         client = CoveClient(creds)

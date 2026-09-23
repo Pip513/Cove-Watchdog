@@ -60,7 +60,7 @@ Every setting and its accepted format: README.md, "Configuration".
   { "name": "SMTP_SECURITY",               "value": "starttls", "slotSetting": false },
   { "name": "SMTP_USERNAME",               "value": "", "slotSetting": false },
   { "name": "SMTP_PASSWORD",               "value": "", "slotSetting": false },
-  { "name": "SMTP_VERIFY_CERT",            "value": "true", "slotSetting": false },
+  { "name": "SMTP_VERIFY_CERT",            "value": "false", "slotSetting": false },
   { "name": "SMTP_TIMEOUT",                "value": "30", "slotSetting": false },
   { "name": "ALERT_FROM",                  "value": "", "slotSetting": false },
   { "name": "ALERT_FROM_NAME",             "value": "Cove Backup Watchdog", "slotSetting": false },

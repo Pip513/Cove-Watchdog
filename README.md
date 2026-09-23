@@ -421,7 +421,11 @@ application settings under **Environment variables**. The names are identical.
 - **Profile names must match the console exactly**, apart from case and
   surrounding spaces. No wildcards, no partial matches — `1 hour RPO` does not
   match `1 hour RPO Server`.
-- **Blank and absent mean the same thing:** the default applies.
+- **Blank means default.** Clearing a value in the portal resets it to the
+  default, exactly as if the setting were not there. The one exception is
+  `ALERT_SUBJECT_PREFIX`, where blank means *no prefix*.
+- **A value that is set but malformed stops the run**, with an error naming
+  the setting — `REPORT_HOUR=eight` fails rather than guessing.
 
 ### Cove API
 
@@ -476,7 +480,7 @@ five *minutes*, while `0 */5 * * *` (five) runs every five *hours*.
 | `SMTP_SECURITY` | No | `starttls` | `starttls`, `ssl` or `none`. Must match the port: `ssl` with 465, `starttls` with 587 or 2525. `none` only for a trusted internal relay |
 | `SMTP_USERNAME` | Usually | *(blank)* | Blank means no authentication, which only an internal relay accepts |
 | `SMTP_PASSWORD` | If username set | *(blank)* | Secret. Required whenever `SMTP_USERNAME` is set |
-| `SMTP_VERIFY_CERT` | No | `true` | True/false. `false` only for an internal relay with a self-signed certificate. Mind the typo rule above — a misspelling turns verification **off** |
+| `SMTP_VERIFY_CERT` | No | `false` | True/false. Off by default because some relays present certificates that fail verification. The connection is still encrypted, but the server's identity is not checked. Set `true` for a provider with a valid certificate, such as a hosted sender |
 | `SMTP_TIMEOUT` | No | `30` | Whole number of seconds |
 
 ### Alert addressing
@@ -486,7 +490,7 @@ five *minutes*, while `0 */5 * * *` (five) runs every five *hours*.
 | `ALERT_FROM` | **Yes** | — | One address your provider lets you send as: `backups@example.com` |
 | `ALERT_FROM_NAME` | No | `Cove Backup Watchdog` | Display name shown as the sender |
 | `ALERT_TO` | **Yes** | — | One or more addresses, separated by commas or semicolons: `ops@example.com, tickets@example.com` |
-| `ALERT_SUBJECT_PREFIX` | No | `[Cove]` | Text placed before every subject. Set blank for none |
+| `ALERT_SUBJECT_PREFIX` | No | `[Cove]` | Text placed before every subject. **Set blank for no prefix** — the only setting where blank does not mean default |
 
 ### State
 
@@ -511,9 +515,10 @@ them alone; state and deployment both depend on them.
 .venv/bin/python test_detection.py    # detection rules, scoping, scheduling
 .venv/bin/python test_failures.py     # failure classification and suppression
 .venv/bin/python test_dispatch.py     # cadence, delivery, state
+.venv/bin/python test_settings.py     # parsing rules; the five settings files agree
 ```
 
-All three should pass before any change ships. They encode failure modes that
+All four should pass before any change ships. They encode failure modes that
 are not obvious from reading the code, and several exist because the naive
 version was wrong in a way that would have been **silent**.
 

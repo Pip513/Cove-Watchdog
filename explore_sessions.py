@@ -21,14 +21,14 @@ Run:  python explore_sessions.py
 
 from __future__ import annotations
 
-import os
 import sys
 import time
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 
-from cove import CoveClient, CoveCredentials, CoveError
+from cove import CoveClient, CoveError
+from cove.runner import credentials_from_env
 
 FIELDS = {
     "F00": "last session status",
@@ -95,12 +95,7 @@ def show(code: str, raw: str | None) -> str:
 
 def main() -> int:
     load_dotenv()
-    creds = CoveCredentials(
-        partner=os.getenv("COVE_PARTNER", ""),
-        username=os.getenv("COVE_USERNAME", ""),
-        password=os.getenv("COVE_PASSWORD", ""),
-        endpoint=os.getenv("COVE_ENDPOINT", "https://api.backup.management/jsonapi"),
-    )
+    creds = credentials_from_env()
 
     columns = list(CONTEXT)
     for src in SOURCES:

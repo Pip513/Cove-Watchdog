@@ -229,8 +229,14 @@ second list.
 #### `cove/notify.py`
 SMTP delivery. Provider-agnostic: a hosted sender, or an internal relay that
 accepts unauthenticated mail on a plain connection. `security` covers
-`starttls` / `ssl` / `none`, auth is skipped entirely when no username is set,
-and certificate verification can be disabled for self-signed internal relays.
+`starttls` / `ssl` / `none`, and auth is skipped entirely when no username is
+set.
+
+Certificate verification is **off by default** (`SMTP_VERIFY_CERT=false`), a
+deliberate choice because some relays present certificates that fail it. The
+connection is still encrypted, but the server is not authenticated, so an
+interceptor could collect the SMTP password. Anyone on a provider with a valid
+certificate should turn it on.
 
 Port 25 is blocked outbound on most Azure compute; a connection failure on that
 port says so explicitly rather than leaving someone to debug a timeout.
@@ -259,6 +265,24 @@ silent about devices is the only honest option.
 
 Config is validated before any API call — a stale profile name makes everything
 after it meaningless and costs a round trip to discover otherwise.
+
+#### `cove/env.py`
+Every setting is read through here, so one rule holds everywhere: **blank means
+the default**, exactly as if the setting were absent. Clearing a value is how
+people "reset" a setting in the portal, and reading blank as an empty string
+used to break that three ways — numbers failed to parse, a blank
+`REPORT_ENABLED` silently turned the weekly report off, and a blank
+`WATCHDOG_SCHEDULE` left the timer with no schedule so the Function never
+loaded.
+
+`env_str`, `env_int`, `env_float`, `env_bool` and `env_secret` (credentials,
+never stripped). A value that is set but malformed raises `CoveConfigError`
+naming the setting. The single exception, `ALERT_SUBJECT_PREFIX`, passes
+`blank_is_empty=True` because blank is a real choice there: no prefix.
+
+**Never read a setting with `os.getenv` directly.** It bypasses this rule, and
+`test_settings.py` fails if you do. `AzureWebJobsStorage` is the one raw read,
+because it belongs to Azure rather than to this project.
 
 #### `cove/state.py`
 Durable state between runs. The check is stateless in itself; state exists only
@@ -373,9 +397,23 @@ suppression and content, `run_check` never raising, and SMTP config validation.
 backends. Consecutive runs are simulated against a real store rather than
 asserting on a single call, because the rules that matter are about sequences.
 
-Run all three:
+#### `test_settings.py`
+The parsing rules — blank means default, malformed values fail naming the
+setting, the subject-prefix exception — plus the regressions they fixed. Then
+the drift check: every setting the code reads must appear, with the same
+default, in the setup script, `azure-app-settings.txt`, the README reference
+and `.env.example`, and the README and script must agree on which are required.
+It also fails if anything reads a setting with `os.getenv` directly, or if the
+txt was hand-edited rather than regenerated.
+
+Defaults come straight from the code by parsing its calls into `cove/env.py`,
+so a default changed in one place fails the suite until it is changed in all
+five. Verified by deliberately breaking each rule in a copy of the repository:
+all seven kinds of drift are caught.
+
+Run all four:
 ```
-python test_detection.py && python test_failures.py && python test_dispatch.py
+python test_detection.py && python test_failures.py && python test_dispatch.py && python test_settings.py
 ```
 
 ### Other files
@@ -389,8 +427,26 @@ python test_detection.py && python test_failures.py && python test_dispatch.py
   times silently fall back to UTC.
 - **`host.json` / `.funcignore`** — Functions host configuration, and what to
   keep out of the deployment package (tests, exploration scripts, secrets,
-  local state).
+  local state, the settings txt).
+- **`azure-app-settings.txt`** — every setting as a block to paste into the
+  Function App's **Environment variables → Advanced edit**, with instructions
+  above a `COPY BELOW THIS LINE` marker. The block begins with a comma so it
+  appends to the three settings Azure creates rather than replacing them.
+  Generated from the script below; see *Adding a setting*.
+- **`scripts/setup-app-settings.ps1`** — the single definition of every setting
+  and its default. With `-AppName`/`-ResourceGroup` it adds missing settings via
+  Azure CLI and never overwrites; with `-OutputJson` it prints the paste block
+  and needs no CLI. Not deployed.
 - **`LICENSE`** — MIT.
+
+**Syncing the repository does not create app settings.** Code deploys and app
+settings are separate. Two attempts to automate settings on sync were built
+and removed: a standalone workflow needed five secrets and variables in the
+deploying fork, and a composite action hooked into Azure's generated workflow
+could not work because that workflow's deploy job never checks out the
+repository. Truly automatic settings need a one-time secret setup in the fork,
+because GitHub does not sync secrets and Azure's secret names carry a random
+suffix.
 
 ---
 
@@ -438,29 +494,10 @@ On Windows the interpreter is `.venv/Scripts/python.exe`.
 
 ## Configuration reference
 
-| Variable | Default | Notes |
-|---|---|---|
-| `COVE_PARTNER` | — | Console name **including** any parenthesised email |
-| `COVE_USERNAME` | — | The API user's login name |
-| `COVE_PASSWORD` | — | The token issued at creation |
-| `COVE_ENDPOINT` | `https://api.backup.management/jsonapi` | Regional hosts differ |
-| `WATCHDOG_THRESHOLD_HOURS` | `4` | Per data source, not per device |
-| `WATCHDOG_GRACE_HOURS` | `24` | From device creation; covers the initial seed |
-| `WATCHDOG_MONITOR_PROFILE` | *(blank)* | Comma-separated, exact console names. Blank = all servers |
-| `WATCHDOG_IGNORE_PROFILE` | *(blank)* | Same format; always wins |
-| `WATCHDOG_TIMEZONE` | `America/New_York` | IANA name; handles DST |
-| `REPORT_ENABLED` | `true` | |
-| `REPORT_DAY` / `REPORT_HOUR` | `monday` / `8` | Local time |
-| `REPORT_DEVICE_LIMIT` | `5` | Devices listed before collapsing to a count |
-| `SMTP_HOST` | — | Required |
-| `SMTP_PORT` | `587` | 465 for `ssl`; avoid 25 on Azure |
-| `SMTP_SECURITY` | `starttls` | `starttls` / `ssl` / `none` |
-| `SMTP_USERNAME` / `SMTP_PASSWORD` | *(blank)* | Blank for an unauthenticated relay |
-| `SMTP_VERIFY_CERT` | `true` | `false` only for self-signed internal relays |
-| `SMTP_TIMEOUT` | `30` | |
-| `ALERT_FROM` / `ALERT_FROM_NAME` | — | Sender must be authorised by your provider |
-| `ALERT_TO` | — | Comma-separated |
-| `ALERT_SUBJECT_PREFIX` | `[Cove]` | |
+The complete reference — all 31 settings with required, default and accepted
+format — is in **`README.md` under *Configuration***. It is deliberately not
+duplicated here: an earlier copy in this file drifted and silently lost seven
+settings. Keep it in one place.
 
 Threshold guidance: set it to roughly **4× the backup interval**. For hourly
 backups, 4 hours tolerates three consecutive misses before alerting.
@@ -500,7 +537,7 @@ name, `I78` active data sources, `I81` physical/virtual.
 | 2. Detection | Done, per data source |
 | 3. Email transport and content | Done |
 | 4. State store and alert cadence | Done |
-| 5. Azure Functions host | Done, awaiting a first real deployment |
+| 5. Azure Functions host | Done; deployed for internal testing on Flex Consumption, Python 3.14 |
 
 ### Cadence, now that state exists
 
@@ -522,8 +559,10 @@ A week-long outage on one device produces 8 emails, not 168.
 
 ## Deployment
 
-Built and committed; not yet deployed anywhere. `README.md` has the
-step-by-step. This section records the reasoning behind the choices.
+Deployed for internal testing on Flex Consumption, Python 3.14, updated by a
+fork synced from this repository through Azure Deployment Center's generated
+GitHub Actions workflow. `README.md` has the step-by-step. This section records
+the reasoning behind the choices.
 
 ### What any host must provide
 
@@ -553,8 +592,8 @@ Chosen over the alternatives for a small, stateless, scheduled job:
 | **Automation runbook** | Reasonable for a PowerShell shop; worse local development story. |
 | **VM with cron** | A server to patch, for a job that runs 720 times a month. |
 
-At this volume the Consumption plan's free grant covers it; expect to pay only
-for the backing storage account.
+At this volume the Flex Consumption plan's monthly free grant covers it; expect
+to pay only for the backing storage account.
 
 ### The host adapter
 
@@ -571,12 +610,16 @@ failure alert sees:
 - could not notify anyone -> **raises**. This is the case nobody would
   otherwise discover.
 
-A timer trigger for hourly, in Azure's six-field NCRONTAB
+A timer trigger for hourly, using the six-field form of Azure's NCRONTAB
 (`{second} {minute} {hour} {day} {month} {day-of-week}`):
 
 ```
 0 0 * * * *
 ```
+
+Azure also accepts the five-field form, and tells them apart by counting.
+That makes miscounting the real trap: `0 */5 * * * *` is every five minutes,
+`0 */5 * * *` every five hours.
 
 ### Azure-specific traps
 
@@ -642,7 +685,7 @@ comfortable silence.
 
 ## Working on this
 
-- **Run all three test suites before and after any change.** They encode failure
+- **Run all four test suites before and after any change.** They encode failure
   modes that are not obvious from reading the code, and several exist because
   the naive version was wrong in a way that would have been silent.
 - **Never introduce `D09`** into evaluation, however convenient one call looks.
@@ -654,3 +697,28 @@ comfortable silence.
 - When adding a check, add the matching failure kind and remediation text in
   `cove/health.py` — an alert that does not say what to do about it costs
   someone an hour.
+
+### Adding a setting
+
+A setting lives in five places, and missing one is how seven settings went
+undocumented. In order:
+
+1. The code — read it through a `cove/env.py` helper with a **literal**
+   default, e.g. `env_int("REPORT_HOUR", 8)`. Never `os.getenv`.
+2. `scripts/setup-app-settings.ps1` — the same name and default, with a
+   comment.
+3. `azure-app-settings.txt` — regenerate from the script's `-OutputJson`
+   output; do not hand-edit the block.
+4. `README.md` → *Configuration* — a row with required, default and format.
+5. `.env.example` — the name, set to its default, with a comment.
+
+**`test_settings.py` checks all five agree** — names and defaults — so a
+missed step fails the suite rather than surfacing months later. It reads the
+default straight from the code, which is why the default must be a literal.
+A setting read only locally (like `WATCHDOG_STATE_PATH`) is declared in the
+test's `LOCAL_ONLY` and skipped for the Azure-facing files.
+
+Parsing rules to design around: blank means default everywhere except
+`ALERT_SUBJECT_PREFIX`; a malformed number raises naming the setting; and
+true/false settings read any unrecognised value as false, so a typo switches the
+feature off.

@@ -10,13 +10,13 @@ found nothing wrong.
 from __future__ import annotations
 
 import logging
-import os
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 
 from .client import CoveClient, CoveCredentials
 from .detection import Config, DeviceResult, evaluate_all, verify_scope
 from .devices import Device, fetch_devices
+from .env import env_secret, env_str
 from .health import CheckFailure, FailureKind, classify
 from .report import ReportConfig, is_report_due
 
@@ -56,10 +56,10 @@ class CheckOutcome:
 
 def credentials_from_env() -> CoveCredentials:
     return CoveCredentials(
-        partner=os.getenv("COVE_PARTNER", ""),
-        username=os.getenv("COVE_USERNAME", ""),
-        password=os.getenv("COVE_PASSWORD", ""),
-        endpoint=os.getenv("COVE_ENDPOINT", "https://api.backup.management/jsonapi"),
+        partner=env_str("COVE_PARTNER"),
+        username=env_str("COVE_USERNAME"),
+        password=env_secret("COVE_PASSWORD"),
+        endpoint=env_str("COVE_ENDPOINT", "https://api.backup.management/jsonapi"),
     )
 
 

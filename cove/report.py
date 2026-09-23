@@ -12,13 +12,13 @@ even on a run that is also firing alerts.
 
 from __future__ import annotations
 
-import os
 from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .detection import Config, DeviceResult, SkipReason
 from .devices import Device
+from .env import env_bool, env_int, env_str
 from .errors import CoveConfigError
 
 WEEKDAYS = {
@@ -44,12 +44,11 @@ class ReportConfig:
 
     @classmethod
     def from_env(cls) -> "ReportConfig":
-        raw_enabled = os.getenv("REPORT_ENABLED", "true").strip().lower()
         return cls(
-            enabled=raw_enabled in ("1", "true", "yes", "on"),
-            day=os.getenv("REPORT_DAY", "monday").strip().lower(),
-            hour=int(os.getenv("REPORT_HOUR", "8")),
-            device_limit=int(os.getenv("REPORT_DEVICE_LIMIT", "5")),
+            enabled=env_bool("REPORT_ENABLED", True),
+            day=env_str("REPORT_DAY", "monday").lower(),
+            hour=env_int("REPORT_HOUR", 8),
+            device_limit=env_int("REPORT_DEVICE_LIMIT", 5),
         )
 
     def validate(self) -> None:

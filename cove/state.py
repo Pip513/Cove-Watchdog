@@ -26,6 +26,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Protocol
 
+from .env import env_str
+
 log = logging.getLogger(__name__)
 
 #: Meta keys, kept as constants because a typo would silently reset a schedule.
@@ -376,12 +378,12 @@ def default_store() -> StateStore:
     local JSON file. Managed identity is preferred over a connection string
     when both are available, so there is one fewer secret to rotate.
     """
-    account_url = os.getenv("WATCHDOG_TABLE_ACCOUNT_URL", "").strip()
+    account_url = env_str("WATCHDOG_TABLE_ACCOUNT_URL")
     connection_string = (
-        os.getenv("WATCHDOG_STATE_CONNECTION", "").strip()
+        env_str("WATCHDOG_STATE_CONNECTION")
         or os.getenv("AzureWebJobsStorage", "").strip()
     )
-    table_name = os.getenv("WATCHDOG_TABLE_NAME", "covewatchdog").strip()
+    table_name = env_str("WATCHDOG_TABLE_NAME", "covewatchdog")
 
     if account_url or connection_string:
         return TableStorageStateStore(
@@ -391,5 +393,5 @@ def default_store() -> StateStore:
             account_url=account_url or None,
         )
 
-    path = os.getenv("WATCHDOG_STATE_PATH", "watchdog_state.json")
+    path = env_str("WATCHDOG_STATE_PATH", "watchdog_state.json")
     return JsonFileStateStore(path)

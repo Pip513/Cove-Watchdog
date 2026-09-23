@@ -111,7 +111,7 @@ $settings = [ordered]@{
     "SMTP_SECURITY"               = "starttls"   # starttls | ssl | none
     "SMTP_USERNAME"               = ""    # blank for an unauthenticated relay
     "SMTP_PASSWORD"               = ""    # KV ref here
-    "SMTP_VERIFY_CERT"            = "true"  # false only for self-signed internal relays
+    "SMTP_VERIFY_CERT"            = "false" # true to verify the server certificate; needs a valid one
     "SMTP_TIMEOUT"                = "30"
 
     # --- Alert addressing -------------------------------------------------
@@ -136,7 +136,9 @@ $settings = [ordered]@{
     "WATCHDOG_STATE_CONNECTION"   = ""
 
     # --- Schedule ---------------------------------------------------------
-    # Azure NCRONTAB has SIX fields, seconds first. This is hourly, on the
+    # Azure NCRONTAB, five or six fields; six puts seconds first. This is the
+    # six-field form. Count carefully: "0 */5 * * * *" is every five minutes,
+    # "0 */5 * * *" every five hours. This value is hourly, on the
     # hour, in UTC. Temporarily set "0 */5 * * * *" to test a deployment.
     "WATCHDOG_SCHEDULE"           = "0 0 * * * *"
 }
