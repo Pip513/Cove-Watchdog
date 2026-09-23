@@ -403,8 +403,9 @@ suppression and content, `run_check` never raising, and SMTP config validation.
 
 #### `test_dispatch.py`
 77 cases covering the cadence, rendering, partial delivery, both state
-backends, and the reminder time alert emails promise. Consecutive runs are simulated against a real store rather than
-asserting on a single call, because the rules that matter are about sequences.
+backends, and the reminder time alert emails promise. Consecutive runs are
+simulated against a real store rather than asserting on a single call, because
+the rules that matter are about sequences.
 
 #### `test_settings.py`
 The parsing rules — blank means default, malformed values fail naming the
@@ -436,7 +437,16 @@ python test_detection.py && python test_failures.py && python test_dispatch.py &
   times silently fall back to UTC.
 - **`host.json` / `.funcignore`** — Functions host configuration, and what to
   keep out of the deployment package (tests, exploration scripts, secrets,
-  local state, the settings txt).
+  local state, the settings txt). Only `func azure functionapp publish` honours
+  `.funcignore`; the GitHub Actions route ships the whole repository except
+  `.git` and `.github`, which is harmless because nothing in it is secret.
+- **`.github/deploy-workflow.example.yml`** — a corrected GitHub Actions deploy
+  workflow. It does not run from there. Azure Deployment Center's generated
+  Python workflow installs dependencies into the build runner instead of the
+  package and zips with `./*`, which skips `.python_packages`; the result
+  deploys "successfully" and then fails to load with `ModuleNotFoundError`.
+  The example fixes both and adds build-time checks. Reconfiguring Deployment
+  Center regenerates the broken file, which is why the fix is kept here.
 - **`azure-app-settings.txt`** — every setting as a block to paste into the
   Function App's **Environment variables → Advanced edit**, with instructions
   above a `COPY BELOW THIS LINE` marker. The block begins with a comma so it
@@ -546,7 +556,7 @@ name, `I78` active data sources, `I81` physical/virtual.
 | 2. Detection | Done, per data source |
 | 3. Email transport and content | Done |
 | 4. State store and alert cadence | Done |
-| 5. Azure Functions host | Done; deployed for internal testing on Flex Consumption, Python 3.14 |
+| 5. Azure Functions host | Done; running on Flex Consumption, Python 3.14 |
 
 ### Cadence, now that state exists
 
@@ -568,10 +578,11 @@ A week-long outage on one device produces 8 emails, not 168.
 
 ## Deployment
 
-Deployed for internal testing on Flex Consumption, Python 3.14, updated by a
-fork synced from this repository through Azure Deployment Center's generated
-GitHub Actions workflow. `README.md` has the step-by-step. This section records
-the reasoning behind the choices.
+Running on Flex Consumption, Python 3.14, deployed by GitHub Actions through
+Azure Deployment Center's generated workflow - with the fix in
+`.github/deploy-workflow.example.yml` applied, without which the Function
+cannot load. `README.md` has the step-by-step. This section records the
+reasoning behind the choices.
 
 ### What any host must provide
 

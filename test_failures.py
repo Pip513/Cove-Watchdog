@@ -30,7 +30,7 @@ from cove.health import (
     failure_subject,
     should_send_failure,
 )
-from cove.notify import EmailDeliveryError, SmtpConfig
+from cove.notify import SmtpConfig
 from cove.report import ReportConfig
 from cove.runner import CheckOutcome, run_check
 

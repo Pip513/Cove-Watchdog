@@ -17,7 +17,7 @@ from .client import CoveClient, CoveCredentials
 from .detection import Config, DeviceResult, evaluate_all, verify_scope
 from .devices import Device, fetch_devices
 from .env import env_secret, env_str
-from .health import CheckFailure, FailureKind, classify
+from .health import CheckFailure, classify
 from .report import ReportConfig, is_report_due
 
 log = logging.getLogger(__name__)

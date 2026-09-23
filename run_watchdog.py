@@ -24,7 +24,6 @@ from cove.deliver import deliver, plan_for_delivered, render
 from cove.detection import Config
 from cove.dispatch import commit, plan
 from cove.errors import CoveConfigError
-from cove.health import CheckFailure, FailureKind
 from cove.notify import SmtpConfig
 from cove.report import ReportConfig
 from cove.runner import run_check

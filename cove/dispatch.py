@@ -30,7 +30,7 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from .detection import Config, DeviceResult
-from .health import CheckFailure, FailureKind, should_send_failure
+from .health import CheckFailure, should_send_failure
 from .report import ReportConfig, is_report_due
 from .runner import CheckOutcome
 from .state import (

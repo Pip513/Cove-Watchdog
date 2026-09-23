@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from datetime import datetime
 from zoneinfo import ZoneInfo
 
-from .detection import Config, DeviceResult, SkipReason
+from .detection import Config, DeviceResult
 from .devices import Device
 from .env import env_bool, env_int, env_str
 from .errors import CoveConfigError

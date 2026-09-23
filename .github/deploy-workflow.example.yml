@@ -1,0 +1,108 @@
+# Reference deploy workflow for Azure Functions, via GitHub Actions.
+#
+# This file does not run: GitHub only runs workflows in .github/workflows/.
+#
+# Why it exists: the workflow Azure's Deployment Center generates for Python
+# deploys a Function that cannot load (ModuleNotFoundError: No module named
+# 'requests'). It installs dependencies into the build runner rather than the
+# package, and its zip command skips the hidden folder they belong in. The two
+# steps marked FIX below correct that, and two CHECK steps fail the build if it
+# ever happens again.
+#
+# To use it, edit the workflow Deployment Center committed to your repository:
+#   - replace its build job with the build job below
+#   - keep its deploy job as it is, above all the three secret names, which
+#     carry a suffix unique to your app
+# Reconfiguring Deployment Center rewrites that file and brings the bug back,
+# so reapply this afterwards.
+
+name: Build and deploy Python project to Azure Function App
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+env:
+  AZURE_FUNCTIONAPP_PACKAGE_PATH: '.' # repository root
+  PYTHON_VERSION: '3.14' # must match the Function App's Python version
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read # required for actions/checkout
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python version
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      # FIX: install INTO the package, in the folder Azure searches. A plain
+      # `pip install` puts them in this runner's own Python, so they never ship.
+      - name: Install dependencies into the package
+        run: pip install -r requirements.txt --target=".python_packages/lib/site-packages"
+
+      # CHECK: every dependency imports from where the package will carry it.
+      - name: Check dependencies import
+        run: |
+          PYTHONPATH=.python_packages/lib/site-packages \
+            python -c "import requests, dotenv, tzdata, azure.functions, azure.data.tables, azure.identity"
+
+      # FIX: "zip ./*" skips hidden folders, which silently drops
+      # .python_packages. Zipping "." keeps them; the git folders are left out.
+      - name: Zip artifact for deployment
+        run: zip -r -q release.zip . -x '.git/*' '.github/*'
+
+      # CHECK: the dependencies really are in the zip that will be deployed.
+      - name: Check dependencies are in the package
+        run: |
+          unzip -l release.zip | grep -q '.python_packages/lib/site-packages/requests/' \
+            || { echo "::error::Dependencies are missing from release.zip"; exit 1; }
+
+      - name: Upload artifact for deployment job
+        uses: actions/upload-artifact@v4
+        with:
+          name: python-app
+          path: release.zip
+
+  # Shown for completeness. Keep the one Deployment Center generated for you.
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    permissions:
+      id-token: write # required for requesting the JWT
+      contents: read
+
+    steps:
+      - name: Download artifact from build job
+        uses: actions/download-artifact@v4
+        with:
+          name: python-app
+
+      - name: Unzip artifact for deployment
+        run: |
+          unzip -q release.zip
+          rm release.zip
+
+      - name: Login to Azure
+        uses: azure/login@v2
+        with:
+          # Placeholders. Deployment Center creates these secrets with a
+          # random suffix; use the names from your generated workflow.
+          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_YOURSUFFIX }}
+          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_YOURSUFFIX }}
+          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_YOURSUFFIX }}
+
+      - name: Deploy to Azure Functions
+        uses: Azure/functions-action@v1
+        id: deploy-to-function
+        with:
+          app-name: 'your-function-app-name'
+          slot-name: 'Production'
+          package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}

@@ -23,7 +23,6 @@ from cove.health import CheckFailure, FailureKind
 from cove.report import ReportConfig
 from cove.runner import CheckOutcome
 from cove.state import (
-    META_FAILURE_LAST_SENT,
     META_REPORT_LAST_SENT,
     InMemoryStateStore,
     JsonFileStateStore,
@@ -309,7 +308,7 @@ with tempfile.TemporaryDirectory() as tmp:
 print("\nRendering\n")
 
 import cove.deliver as deliver_module  # noqa: E402
-from cove.deliver import DeliveryResult, deliver, plan_for_delivered, render  # noqa: E402
+from cove.deliver import deliver, plan_for_delivered, render  # noqa: E402
 from cove.notify import EmailDeliveryError, SmtpConfig  # noqa: E402
 
 SMTP = SmtpConfig(host="h", from_address="a@b.c", to_addresses=["d@e.f"])

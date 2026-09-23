@@ -17,7 +17,7 @@ from zoneinfo import ZoneInfo
 from dotenv import load_dotenv
 
 from cove import CoveClient, CoveError
-from cove.detection import Config, SkipReason, Verdict, evaluate_all, verify_scope
+from cove.detection import Config, evaluate_all, verify_scope
 from cove.devices import fetch_devices
 from cove.report import ReportConfig, is_report_due, report_body, report_subject
 from cove.runner import credentials_from_env

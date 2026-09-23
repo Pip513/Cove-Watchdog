@@ -284,12 +284,33 @@ pwsh scripts/setup-app-settings.ps1 -AppName "<app>" -ResourceGroup "<rg>"
 func azure functionapp publish $APP
 ```
 
+`.funcignore` keeps tests, exploration scripts, `.env` and local state out of
+the package.
+
 Or connect your repository under the Function App's **Deployment Center**,
 which sets up a GitHub Actions workflow that deploys on every push to the
 branch. That is the route that makes syncing a fork update the app.
 
-`.funcignore` keeps tests, exploration scripts, `.env` and local state out of
-the package.
+> **The workflow Deployment Center generates is broken for Python.** It deploys,
+> reports success, and the Function never loads:
+> `ModuleNotFoundError: No module named 'requests'`. Two lines in its build job
+> need changing:
+>
+> | Step | Generated | Change to |
+> |---|---|---|
+> | Install | `pip install -r requirements.txt` | `pip install -r requirements.txt --target=".python_packages/lib/site-packages"` |
+> | Zip | `zip release.zip ./* -r` | `zip -r -q release.zip . -x '.git/*' '.github/*'` |
+>
+> The first installs the dependencies into the package instead of the build
+> machine; the second stops the zip skipping the hidden folder they go in.
+> [`.github/deploy-workflow.example.yml`](.github/deploy-workflow.example.yml)
+> has the corrected build job, plus checks that fail the build if dependencies
+> go missing again. Keep the deploy job Azure generated: its secret names are
+> unique to your app. Reconfiguring Deployment Center rewrites the file, so
+> reapply the fix afterwards.
+>
+> This route ignores `.funcignore` and ships everything except `.git` and
+> `.github`. Nothing in the repository is secret, so that is harmless.
 
 ### 4. Verify it runs
 
