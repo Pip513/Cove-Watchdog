@@ -208,6 +208,10 @@ Deliberate choices:
   name (in the footer, what you search the console by). Both are needed.
 - **Relative and absolute times.** The age answers "how bad", the timestamp
   answers "when did it actually stop".
+- **No hard-coded times.** The next-reminder line is computed from
+  `WATCHDOG_REALERT_HOUR` and `WATCHDOG_TIMEZONE` via `dispatch.next_daily_send`,
+  with a real date and zone. It also says a reminder may come sooner, because
+  a failure spreading to another data source alerts at once.
 - **Stable subjects** per device and per kind, so a ticket system threading on
   subject groups repeat alerts into one ticket rather than opening a new one
   daily.
@@ -310,6 +314,11 @@ mail server or an API.
 `plan()` decides and reads state; `commit()` records. They are separate so that
 a send failure does not mark a message as delivered.
 
+`next_daily_send()` sits beside `is_daily_due()` and computes the time an
+alert email promises for the next reminder. They are kept together, and tested
+against each other, because the email once hard-coded "08:00 tomorrow" and
+would have kept saying so whatever `WATCHDOG_REALERT_HOUR` was set to.
+
 #### `cove/deliver.py`
 Renders a plan into messages and sends them. `plan_for_delivered()` reduces a
 plan to what actually sent, so an undelivered alert is retried next run instead
@@ -393,8 +402,8 @@ these do.
 suppression and content, `run_check` never raising, and SMTP config validation.
 
 #### `test_dispatch.py`
-67 cases covering the cadence, rendering, partial delivery and both state
-backends. Consecutive runs are simulated against a real store rather than
+77 cases covering the cadence, rendering, partial delivery, both state
+backends, and the reminder time alert emails promise. Consecutive runs are simulated against a real store rather than
 asserting on a single call, because the rules that matter are about sequences.
 
 #### `test_settings.py`

@@ -17,6 +17,7 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from .detection import Config, DatasourceFinding, DeviceResult
+from .dispatch import next_daily_send
 
 
 def _local(when: datetime | None, timezone: str) -> str:
@@ -145,7 +146,13 @@ def alert_body(
     lines.append("")
     lines += _footer(result, config, now)
     lines.append("")
-    lines.append("Next alert 08:00 tomorrow unless resolved.")
+    # Computed, not written in: the hour and zone come from the same settings
+    # the cadence uses, so the promise matches what actually happens.
+    reminder = next_daily_send(now, config.realert_hour, config.display_timezone)
+    lines.append(
+        f"Next reminder {reminder.strftime('%a %d %b, %H:%M %Z')}, unless resolved."
+    )
+    lines.append("Sooner if another data source stops backing up.")
     return "\n".join(lines)
 
 

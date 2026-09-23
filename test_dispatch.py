@@ -542,6 +542,75 @@ check(
     f"{len(store.all_devices())} loaded",
 )
 
+print("\nThe reminder time an email promises\n")
+
+from cove.dispatch import next_daily_send  # noqa: E402
+from cove.messages import alert_body  # noqa: E402
+from cove.report import report_body  # noqa: E402
+
+TZ = "America/New_York"
+
+reminder = next_daily_send(at("2026-09-21 17:00"), 8, TZ)
+check(
+    "alert at 17:00 Monday -> reminder Tuesday 08:00",
+    reminder == at("2026-09-22 08:00"),
+    str(reminder),
+)
+check(
+    "alert at 03:00 -> still tomorrow, not later today",
+    next_daily_send(at("2026-09-21 03:00"), 8, TZ) == at("2026-09-22 08:00"),
+)
+check(
+    "follows WATCHDOG_REALERT_HOUR",
+    next_daily_send(at("2026-09-21 17:00"), 14, TZ) == at("2026-09-22 14:00"),
+)
+
+# Daylight saving ends at 02:00 on Sunday 1 November 2026.
+across_dst = next_daily_send(at("2026-10-31 17:00"), 8, TZ)
+check(
+    "across the DST change -> 08:00 EST, not 07:00 or 09:00",
+    across_dst.astimezone(EASTERN).strftime("%H:%M %Z") == "08:00 EST",
+    across_dst.astimezone(EASTERN).strftime("%H:%M %Z"),
+)
+
+# The promise must match the rule that keeps it, wherever the alert lands:
+# due at the promised minute, and not a minute before.
+mismatches = []
+for sent in ("2026-09-21 17:00", "2026-09-21 03:00", "2026-09-21 08:00", "2026-10-31 23:30"):
+    for hour in (0, 8, 23):
+        promised = next_daily_send(at(sent), hour, TZ)
+        on_time = is_daily_due(promised, at(sent), hour, TZ)
+        early = is_daily_due(promised - timedelta(minutes=1), at(sent), hour, TZ)
+        if not on_time or early:
+            mismatches.append(f"{sent} hour {hour}: on time {on_time}, early {early}")
+check(
+    "the promised time is exactly when the cadence sends (12 cases)",
+    not mismatches,
+    "; ".join(mismatches),
+)
+
+now = at("2026-09-21 17:00")
+result = evaluate_all([device(now, ages=broken)], CONFIG, now)[0]
+body = alert_body(result, Config(threshold_hours=4.0, realert_hour=8), now)
+check(
+    "alert email states the real next reminder, with its timezone",
+    "Next reminder Tue 22 Sep, 08:00 EDT, unless resolved." in body,
+    [l for l in body.splitlines() if "reminder" in l.lower()],
+)
+body_14 = alert_body(result, Config(threshold_hours=4.0, realert_hour=14), now)
+check(
+    "and changes when WATCHDOG_REALERT_HOUR does",
+    "Tue 22 Sep, 14:00 EDT" in body_14 and "08:00" not in body_14.split("Next reminder")[1],
+)
+check("alert email warns it may come sooner", "Sooner if another data source" in body)
+
+report = report_body([result], [result.device], at("2026-09-21 08:00"), CONFIG,
+                     ReportConfig(enabled=True, day="wednesday", hour=8))
+check("weekly report footer names its timezone", "Wednesday at 08:00 EDT" in report)
+
+longest = max(len(l) for text in (body, body_14, report) for l in text.splitlines())
+check("no line passes the ~78 characters mail clients wrap at", longest <= 78, f"{longest}")
+
 print()
 if _failures:
     print(f"{len(_failures)} FAILED: {', '.join(_failures)}")

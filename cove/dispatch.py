@@ -26,7 +26,7 @@ from __future__ import annotations
 
 import logging
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from .detection import Config, DeviceResult
@@ -62,6 +62,20 @@ def is_daily_due(
     if local_last.date() >= local_now.date():
         return False
     return local_now.hour >= hour
+
+
+def next_daily_send(sent_at: datetime, hour: int, timezone_name: str) -> datetime:
+    """When the next once-a-day message becomes due, given one sent now.
+
+    The counterpart to `is_daily_due`, kept beside it so the promise an email
+    makes ("next reminder at...") cannot drift from the rule that keeps it.
+    Always the next local calendar day at `hour` - even for a message sent in
+    the small hours, because the cadence never repeats on the same day.
+    Daylight saving is handled by building the time in the local zone.
+    """
+    tz = ZoneInfo(timezone_name)
+    tomorrow = sent_at.astimezone(tz).date() + timedelta(days=1)
+    return datetime(tomorrow.year, tomorrow.month, tomorrow.day, hour, tzinfo=tz)
 
 
 @dataclass

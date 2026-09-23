@@ -215,9 +215,11 @@ def report_body(
         lines.append(f"  muted profiles: {', '.join(config.ignore_profiles)}")
     lines.append("")
 
+    # Two lines, not one: with the longest day name and a timezone this would
+    # otherwise pass the ~78 characters at which mail clients hard-wrap.
     lines.append(
         f"This report is sent every {report_config.day.capitalize()} at "
-        f"{report_config.hour:02d}:00 whether or not anything is wrong."
+        f"{report_config.hour:02d}:00 {local.strftime('%Z')}, whether or not anything"
     )
-    lines.append("If it stops arriving, the check itself has stopped running.")
+    lines.append("is wrong. If it stops arriving, the check itself has stopped running.")
     return "\n".join(lines)
