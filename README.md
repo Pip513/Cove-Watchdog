@@ -449,18 +449,61 @@ application settings under **Environment variables**. The names are identical.
 | `WATCHDOG_MAX_EMAILS_PER_RUN` | No | `25` | Whole number, 1 or more. Above this, one summary replaces the individual alerts |
 | `WATCHDOG_SCHEDULE` | No | `0 0 * * * *` | NCRONTAB in **UTC**, five or six fields. Six fields puts seconds first. See below |
 
-`WATCHDOG_SCHEDULE` examples:
+#### How `WATCHDOG_SCHEDULE` works
+
+It controls how often the watchdog **checks** — not when emails go out. Email
+timing uses local time, from `WATCHDOG_REALERT_HOUR` and
+`REPORT_DAY`/`REPORT_HOUR`.
+
+The format is Azure's NCRONTAB: six fields separated by spaces, from the
+smallest unit to the largest.
 
 ```
-0 0 * * * *       hourly, on the hour          six fields (recommended)
-0 * * * *         hourly, on the hour          five fields, same result
-0 30 * * * *      hourly, at half past
-0 */5 * * * *     every five minutes           testing only
+0   0   *   *   *   *
+│   │   │   │   │   └── day of week   0-6 (0 = Sunday), or Sun-Sat
+│   │   │   │   └────── month         1-12, or Jan-Dec
+│   │   │   └────────── day of month  1-31
+│   │   └────────────── hour          0-23, in UTC
+│   └────────────────── minute        0-59
+└────────────────────── second        0-59
 ```
 
-**Count the fields.** Azure reads the expression by how many there are, so the
-same-looking string means different things: `0 */5 * * * *` (six) runs every
-five *minutes*, while `0 */5 * * *` (five) runs every five *hours*.
+So `0 0 * * * *` reads as "second 0, minute 0, any hour, any day": the top of
+every hour.
+
+| Symbol | Meaning | Example | Result |
+|---|---|---|---|
+| `*` | every value | `*` in hour | every hour |
+| a number | exactly that value | `30` in minute | at :30 |
+| `,` | a list | `0,30` in minute | at :00 and :30 |
+| `-` | a range | `9-17` in hour | 9 am through 5 pm (UTC) |
+| `*/n` | every *n*th | `*/15` in minute | at :00, :15, :30, :45 |
+
+Useful values:
+
+| Schedule | Runs | Use |
+|---|---|---|
+| `0 0 * * * *` | hourly, on the hour | **Recommended** |
+| `0 */15 * * * *` | every 15 minutes | Faster detection; the extra cost is negligible |
+| `0 30 * * * *` | hourly, at half past | Same as hourly, offset |
+| `0 */5 * * * *` | every 5 minutes | Testing only |
+
+**Three traps:**
+
+1. **It is UTC.** `0 0 9 * * *` is 9:00 UTC, which is 5 am EDT or 4 am EST.
+   That is deliberate — the app converts to local time itself — so do not set
+   `WEBSITE_TIME_ZONE` to "fix" it.
+2. **Always put `0` in the seconds field.** A `*` there means *every second*:
+   `* * * * * *` would call the Cove API 86,400 times a day.
+3. **Count the fields.** Azure also accepts standard five-field cron, which has
+   no seconds field, and decides which you meant by counting. Similar-looking
+   strings therefore differ wildly: `0 */5 * * * *` (six fields) runs every
+   five *minutes*, while `0 */5 * * *` (five fields) runs every five *hours*.
+
+**Do not go slower than hourly.** The daily reminder and the weekly report each
+go out on the first run *at or after* their hour. On a two-hourly schedule they
+can arrive up to two hours late, and missed backups are noticed up to two hours
+later too. Faster than hourly is fine and costs almost nothing.
 
 ### Weekly report
 
