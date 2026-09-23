@@ -220,11 +220,9 @@ App already has, and the table is created on first use.
 
 ### 2. Configure application settings
 
-**Six settings need a value from you.** The rest have defaults in the code,
-and the section below makes all thirty appear in the portal automatically so
-they are there to adjust.
-
-In the portal: **Function App → Settings → Environment variables**
+Every setting is listed with its format in the
+[configuration reference](#configuration). These must have a value before
+anything runs:
 
 | Setting | |
 |---|---|
@@ -233,60 +231,38 @@ In the portal: **Function App → Settings → Environment variables**
 | `COVE_PASSWORD` | The token, shown once at creation |
 | `SMTP_HOST` | Your mail host |
 | `ALERT_FROM` | Sender your provider allows |
-| `ALERT_TO` | Where alerts go; comma-separated |
+| `ALERT_TO` | Where alerts go |
 
-That is the whole required setup. Nothing can automate it — a Cove token and
-an SMTP host are values only you have.
+Plus `SMTP_USERNAME` and `SMTP_PASSWORD` if your mail provider requires
+authentication — most hosted ones do.
 
-Until all six have values, **every run fails loudly**. That is the design
+Until these have values, **every run fails loudly**. That is the design
 refusing to look healthy while it is inert, not a broken deployment.
 
-#### Changing a default
+**Deploying code does not create settings.** A deploy ships code only; app
+settings are separate. Everything else has a default in the code, so it only
+needs to exist in Azure if you want it visible and adjustable in the portal.
+Two ways to add the full set:
 
-Anything in the [configuration reference](#configuration) can be overridden by
-adding it as a setting. Common ones:
+**Portal, no tools needed.** Generate the JSON:
 
-```
-WATCHDOG_THRESHOLD_HOURS    4        hours before a data source counts as missed
-WATCHDOG_MONITOR_PROFILE             profile names to watch; blank = all servers
-WATCHDOG_IGNORE_PROFILE              profiles to mute
-WATCHDOG_TIMEZONE           America/New_York
-SMTP_PORT                   587
+```bash
+pwsh scripts/setup-app-settings.ps1 -OutputJson
 ```
 
-#### Making every setting appear automatically
+Then **Function App → Settings → Environment variables → Advanced edit**, and
+paste the output inside the existing array, just before the closing `]`. It
+starts with a comma for exactly that reason.
 
-So the full tunable surface is visible in the portal without anyone typing
-thirty names, add two lines to the deployment workflow Azure generated in your
-repository (`.github/workflows/<app-name>.yml`), immediately after its
-`azure/login` step:
+> **Advanced edit replaces everything.** Keep `AzureWebJobsStorage`,
+> `APPLICATIONINSIGHTS_CONNECTION_STRING` and
+> `DEPLOYMENT_STORAGE_CONNECTION_STRING` — losing them breaks the app.
 
-```yaml
-      - name: Configure Cove Watchdog settings
-        uses: ./.github/actions/configure-settings
-        with:
-          app-name: ${{ env.AZURE_FUNCTIONAPP_NAME }}
-          resource-group: <your-resource-group>
-```
-
-That is the only edit. It reuses the Azure session that workflow already
-establishes, so **there are no secrets to add and nothing to configure** — the
-Deployment Center set all of that up when it wired the repository.
-
-From then on every deploy creates any setting that does not yet exist. It never
-overwrites, so a value you tune in the portal survives, and a setting added to
-this project later appears on your next sync.
-
-The logic lives in `.github/actions/configure-settings/`, so it is version
-controlled here and updates reach you by syncing. Only the two-line hook sits
-in Azure's generated file — worth knowing because Azure rewrites that file if
-you reconfigure the Deployment Center, and the hook would need re-adding.
-
-**Or run it by hand**, any time:
+**Azure CLI.** Adds only what is missing and never overwrites, so it is safe
+to re-run after pulling an update that introduces a new setting:
 
 ```bash
 pwsh scripts/setup-app-settings.ps1 -AppName "<app>" -ResourceGroup "<rg>"
-pwsh scripts/setup-app-settings.ps1 -OutputJson     # no Azure CLI needed
 ```
 
 > **Do not set `WEBSITE_TIME_ZONE`.** The timer runs in UTC on purpose; the
@@ -303,6 +279,10 @@ pwsh scripts/setup-app-settings.ps1 -OutputJson     # no Azure CLI needed
 ```bash
 func azure functionapp publish $APP
 ```
+
+Or connect your repository under the Function App's **Deployment Center**,
+which sets up a GitHub Actions workflow that deploys on every push to the
+branch. That is the route that makes syncing a fork update the app.
 
 `.funcignore` keeps tests, exploration scripts, `.env` and local state out of
 the package.
@@ -354,7 +334,8 @@ morning, something is wrong regardless of what any alert says.
 
 ### Cost
 
-At hourly execution this sits inside the Consumption plan's free grant. Expect
+At hourly execution this sits well inside the Flex Consumption plan's monthly
+free grant. Expect
 to pay only for the storage account, which will be pennies a month. Application
 Insights has a free ingestion allowance that this will not approach.
 
@@ -415,18 +396,108 @@ and it does alert — through the ordinary threshold, with no special rule.
 
 ## Configuration
 
-Full annotated list in [`.env.example`](.env.example). The ones you will
-actually change:
+Every setting the watchdog reads. Locally they go in `.env`; in Azure they are
+application settings under **Environment variables**. The names are identical.
 
-| Setting | Default | |
-|---|---|---|
-| `WATCHDOG_THRESHOLD_HOURS` | `4` | Per data source. Set to roughly 4× your backup interval |
-| `WATCHDOG_MONITOR_PROFILE` | *(blank)* | Comma-separated profile names. Blank = all servers |
-| `WATCHDOG_IGNORE_PROFILE` | *(blank)* | Same format. Always wins. Move a device here to mute it |
-| `WATCHDOG_TIMEZONE` | `America/New_York` | IANA name; handles DST |
-| `WATCHDOG_REALERT_HOUR` | `8` | Local hour for the daily repeat |
-| `REPORT_DAY` / `REPORT_HOUR` | `monday` / `8` | The heartbeat report |
-| `ALERT_TO` | — | Comma-separated. Point at a ticket queue when ready |
+### Format rules that catch people
+
+- **Timezone: use a city, never an abbreviation.** `America/New_York` switches
+  between EST and EDT correctly. `EST` is *accepted* but pinned to UTC−5 all
+  year, so from March to November every scheduled email fires an hour late.
+  Windows names like `Eastern Standard Time` are rejected outright.
+  [Full list of names](https://en.wikipedia.org/wiki/List_of_tz_database_time_zones).
+- **Hours are whole numbers on a 24-hour clock, in `WATCHDOG_TIMEZONE`.**
+  `8` is 8 am, `17` is 5 pm. The one exception is `WATCHDOG_SCHEDULE`, which is
+  UTC.
+- **Durations are hours and may have decimals.** `0.5` is thirty minutes.
+- **True/false accepts** `true`, `yes`, `on`, `1` — case ignored. **Anything
+  else counts as false**, including typos: `REPORT_ENABLED=ture` silently turns
+  the weekly report off. Check the spelling.
+- **Lists are comma-separated.** Spaces around items are ignored.
+- **Profile names must match the console exactly**, apart from case and
+  surrounding spaces. No wildcards, no partial matches — `1 hour RPO` does not
+  match `1 hour RPO Server`.
+- **Blank and absent mean the same thing:** the default applies.
+
+### Cove API
+
+| Setting | Required | Default | Format |
+|---|---|---|---|
+| `COVE_PARTNER` | **Yes** | — | Customer name exactly as the console shows it, **including** the parenthesised contact email: `Acme Ltd (admin@acme.com)` |
+| `COVE_USERNAME` | **Yes** | — | The API user's login name |
+| `COVE_PASSWORD` | **Yes** | — | The API token, shown once when the user is created. Secret |
+| `COVE_ENDPOINT` | No | `https://api.backup.management/jsonapi` | Full URL. Only change if N-able directs you to a regional host |
+
+### Detection
+
+| Setting | Required | Default | Format |
+|---|---|---|---|
+| `WATCHDOG_THRESHOLD_HOURS` | No | `4` | Hours, decimals allowed, above 0. Checked per data source. Roughly 4× your backup interval |
+| `WATCHDOG_GRACE_HOURS` | No | `24` | Hours, decimals allowed, 0 or more. How long after a device is created before it can alert |
+| `WATCHDOG_MONITOR_PROFILE` | No | *(blank: all servers)* | Comma-separated profile names: `1 hour RPO Server,Daily Server`. When set, **only** these profiles are checked, workstations included. A name matching no device stops the run |
+| `WATCHDOG_IGNORE_PROFILE` | No | *(blank)* | Same format. Always wins over the monitor list. A name matching no device logs a warning |
+| `WATCHDOG_TIMEZONE` | No | `America/New_York` | Timezone name: `America/Chicago`, `America/Denver`, `America/Los_Angeles`, `Europe/London`, `UTC` |
+| `WATCHDOG_REALERT_HOUR` | No | `8` | Whole hour, 0–23, local. When a still-failing device is re-alerted each day. The first alert is always immediate |
+| `WATCHDOG_MAX_EMAILS_PER_RUN` | No | `25` | Whole number, 1 or more. Above this, one summary replaces the individual alerts |
+| `WATCHDOG_SCHEDULE` | No | `0 0 * * * *` | NCRONTAB in **UTC**, five or six fields. Six fields puts seconds first. See below |
+
+`WATCHDOG_SCHEDULE` examples:
+
+```
+0 0 * * * *       hourly, on the hour          six fields (recommended)
+0 * * * *         hourly, on the hour          five fields, same result
+0 30 * * * *      hourly, at half past
+0 */5 * * * *     every five minutes           testing only
+```
+
+**Count the fields.** Azure reads the expression by how many there are, so the
+same-looking string means different things: `0 */5 * * * *` (six) runs every
+five *minutes*, while `0 */5 * * *` (five) runs every five *hours*.
+
+### Weekly report
+
+| Setting | Required | Default | Format |
+|---|---|---|---|
+| `REPORT_ENABLED` | No | `true` | True/false. Leave on: its absence on Monday is how you learn the watchdog has died |
+| `REPORT_DAY` | No | `monday` | Full weekday name, case ignored: `monday` … `sunday`. Abbreviations like `mon` are rejected |
+| `REPORT_HOUR` | No | `8` | Whole hour, 0–23, local |
+| `REPORT_DEVICE_LIMIT` | No | `5` | Whole number, 1 or more. Devices listed before the rest collapse to a count |
+
+### Email
+
+| Setting | Required | Default | Format |
+|---|---|---|---|
+| `SMTP_HOST` | **Yes** | — | Hostname only, no `https://` and no port: `mail.smtp2go.com` |
+| `SMTP_PORT` | No | `587` | Whole number. `587` for STARTTLS, `465` for SSL, `2525` as an alternate. **Not `25` on Azure** — blocked outbound |
+| `SMTP_SECURITY` | No | `starttls` | `starttls`, `ssl` or `none`. Must match the port: `ssl` with 465, `starttls` with 587 or 2525. `none` only for a trusted internal relay |
+| `SMTP_USERNAME` | Usually | *(blank)* | Blank means no authentication, which only an internal relay accepts |
+| `SMTP_PASSWORD` | If username set | *(blank)* | Secret. Required whenever `SMTP_USERNAME` is set |
+| `SMTP_VERIFY_CERT` | No | `true` | True/false. `false` only for an internal relay with a self-signed certificate. Mind the typo rule above — a misspelling turns verification **off** |
+| `SMTP_TIMEOUT` | No | `30` | Whole number of seconds |
+
+### Alert addressing
+
+| Setting | Required | Default | Format |
+|---|---|---|---|
+| `ALERT_FROM` | **Yes** | — | One address your provider lets you send as: `backups@example.com` |
+| `ALERT_FROM_NAME` | No | `Cove Backup Watchdog` | Display name shown as the sender |
+| `ALERT_TO` | **Yes** | — | One or more addresses, separated by commas or semicolons: `ops@example.com, tickets@example.com` |
+| `ALERT_SUBJECT_PREFIX` | No | `[Cove]` | Text placed before every subject. Set blank for none |
+
+### State
+
+| Setting | Required | Default | Format |
+|---|---|---|---|
+| `WATCHDOG_TABLE_NAME` | No | `covewatchdog` | Azure table name: 3–63 letters and digits, starting with a letter. Created on first use |
+| `WATCHDOG_TABLE_ACCOUNT_URL` | No | *(blank)* | `https://<storage-account>.table.core.windows.net`. Setting it switches to a managed identity — see *Optional hardening* |
+| `WATCHDOG_STATE_CONNECTION` | No | *(blank: uses `AzureWebJobsStorage`)* | A storage connection string, only to keep state in a different account |
+| `WATCHDOG_STATE_PATH` | Local only | `watchdog_state.json` | File path for local runs. Ignored in Azure, which always uses Table Storage |
+
+### Set by Azure, not by you
+
+`AzureWebJobsStorage`, `APPLICATIONINSIGHTS_CONNECTION_STRING` and
+`DEPLOYMENT_STORAGE_CONNECTION_STRING` are created with the Function App. Leave
+them alone; state and deployment both depend on them.
 
 ---
 
