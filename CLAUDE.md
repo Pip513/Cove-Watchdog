@@ -685,6 +685,14 @@ scripts, never in the package.
 **State fits in Table Storage** in the storage account the Function already
 needs. No extra resource.
 
+**Leave the Function App's storage authentication on secrets.** Microsoft's
+portal guide for Flex suggests switching the create wizard's Authentication tab
+to managed identity. That replaces the `AzureWebJobsStorage` connection string
+with identity-based `AzureWebJobsStorage__*` settings, which `default_store()`
+does not read, so it falls back to a local JSON file that does not work in
+Azure. The README tells people to leave it on secrets and add identities
+afterwards through `WATCHDOG_TABLE_ACCOUNT_URL`.
+
 **The dead-man's switch is not optional.** Configure an Application Insights
 alert on function failures *and* on the absence of successful executions. This
 is the layer below the weekly report: if the Function stops being invoked

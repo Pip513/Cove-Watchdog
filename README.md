@@ -37,18 +37,21 @@ That gap is the main reason this exists.
 
 ## Requirements
 
-- An N-able Cove account and permission to create an API user
-- Python **3.14** (3.10+ works; see the version note under Deploy)
+- An N-able Cove account, and permission to create an API user
 - An SMTP host — a provider or an internal relay
-- For deployment: an Azure subscription and Contributor rights
+- A GitHub account, to fork this repository
+- An Azure subscription where you can create resources **and assign roles**:
+  Owner on the resource group, or Contributor plus User Access Administrator.
+  Connecting GitHub to Azure gives the deploy identity a role, which
+  Contributor alone cannot do
+- Nothing installed on your machine, unless you also want to
+  [run it locally](#run-it-locally-optional)
 
 ---
 
-## Quick start (local, read-only)
+## Before you start
 
-Nothing here sends email or writes to Cove.
-
-### 1. Create a Cove API user
+### Create a Cove API user
 
 In the Management Console: **Management → Users → API Users → Add API user**.
 
@@ -57,55 +60,35 @@ In the Management Console: **Management → Users → API Users → Add API user
   time of writing that is `Operator`. `Supporter` is lower but cannot read
   profiles, which the monitor/ignore profile settings need.
 - Do **not** tick Security Officer.
-- **The token is shown exactly once.** Copy it straight into `.env`.
+- **The token is shown exactly once.** Put it in your password manager
+  straight away.
 
 An API user carries the `NonInteractive` flag and cannot log into the console at
 all, which is why it is preferred over a normal user with API access.
 
-### 2. Configure
+### Collect your details
 
-```bash
-cp .env.example .env
-```
+| You need | From |
+|---|---|
+| Cove partner name | The console, exactly as shown — see below |
+| Cove API username and token | The step above |
+| SMTP host, port, username and password | Your mail provider or relay |
+| A sender address | One your provider lets you send as |
+| Where alerts go | One or more addresses, or a ticket system |
 
-> **The one that catches everybody:** `COVE_PARTNER` must match the console
+> **The one that catches everybody:** the partner name must match the console
 > exactly, and the console name usually includes the contact email in
 > parentheses — `Acme Ltd (admin@acme.com)`, not `Acme Ltd`. The bare company
 > name is rejected with *"Unknown partner/username or bad password"*, which
 > reads like a credential problem and is not.
 
-### 3. Install and verify
-
-```bash
-python -m venv .venv
-.venv/bin/pip install -r requirements.txt
-```
-
-On Windows the interpreter is `.venv/Scripts/python.exe`.
-
-```bash
-.venv/bin/python check_auth.py        # credentials and permissions
-.venv/bin/python check_backups.py --all   # what it sees, and what would alert
-.venv/bin/python preview_emails.py    # every email variant
-.venv/bin/python run_watchdog.py      # a full run, dry
-```
-
-`run_watchdog.py` sends nothing and writes no state unless you pass `--send`.
-
-### 4. Test email delivery
-
-Fill in the SMTP block in `.env`, then:
-
-```bash
-.venv/bin/python send_test_email.py --send
-```
-
-That renders a realistic alert from a **synthetic** device, so you can prove
-delivery without waiting for a real failure or mailing about a healthy machine.
-
 ---
 
 ## Deploy to Azure
+
+Everything here happens in a browser, on GitHub and in the Azure portal. Allow
+about half an hour. To script it instead, see
+[Deploy from the command line](#deploy-from-the-command-line).
 
 ### Python version, and why it decides your hosting plan
 
@@ -114,10 +97,10 @@ the longest support runway of any current option — 3.14 is supported until
 April 2029 — which suits a monitoring tool you want to set up once and leave
 alone.
 
-Azure Functions supports 3.10 through 3.14, all GA, but **the classic Linux
-Consumption plan stops at 3.12**. Newer versions are only added to Flex
-Consumption, and Microsoft is steering Consumption apps toward Flex. So the
-version you want decides the plan you create:
+Azure Functions supports 3.10 through 3.14, but **the classic Consumption plan
+stops at 3.12**. Newer versions only come to Flex Consumption, which is where
+Microsoft is steering Consumption apps. So the version you want decides the
+plan:
 
 | Want | Plan | End of support |
 |---|---|---|
@@ -127,23 +110,302 @@ version you want decides the plan you create:
 | 3.11 | Either | October 2027 |
 | 3.10 | Either | **October 2026** — avoid |
 
-Nothing in this project uses syntax past 3.10, so it runs across that whole
-range if you need a different version. It is verified on 3.14: the test suites
-pass with deprecation warnings escalated to errors, and every dependency
-imports cleanly.
+Nothing in this project uses syntax past 3.10, so any version in that range
+works. It is verified on 3.14: the test suites pass with deprecation warnings
+escalated to errors, and every dependency imports cleanly. The portal's
+**Version** list shows what your region actually offers; pick 3.14, or the
+highest there.
 
-**Match your local version to the deployed one.** If they differ you are not
-testing what you ship.
+### 1. Fork the repository
 
-Documentation pages disagree about which versions Flex accepts, so **ask your
-own subscription rather than trusting any doc, including this one**:
+On this repository's GitHub page, select **Fork** and create it under your
+account or organisation.
 
-```bash
-az functionapp list-runtimes --os linux \
-  --query "linux[?starts_with(runtime,'python')].{runtime:runtime, version:version}" -o table
+Your fork is public, as forks of a public repository always are. That is fine:
+nothing secret ever goes into it, because credentials live only in Azure. If it
+must be private, import the repository as a new one instead of forking. You
+lose the one-click **Sync fork** for updates.
+
+### 2. Create the Function App
+
+In the Azure portal: **Create a resource → Function App → Create**, choose
+**Flex Consumption**, then **Select**. Work through the tabs, leaving anything
+not listed here at its default:
+
+| Tab | Setting | Choose |
+|---|---|---|
+| Basics | Resource group | A new one, so removing the watchdog later is a single deletion |
+| Basics | Function App name | Globally unique. Letters, digits and hyphens |
+| Basics | Region | Any listed. Only regions that support Flex Consumption appear |
+| Basics | Runtime stack | **Python** |
+| Basics | Version | **3.14**, or the highest listed |
+| Basics | Instance size | The smallest, 512 MB, is plenty and stretches the free grant furthest |
+| Storage | Storage account | Create new — the default |
+| Networking | Enable public access | **On** — the default. Off blocks the deploy from GitHub |
+| Monitoring | Enable Application Insights | **Yes**. The alerts in step 6 need it |
+| Deployment | Continuous deployment | **Enable**. Sign in to GitHub, then pick your fork and the `main` branch |
+| Deployment | Authentication | The **identity** option, not basic authentication |
+| Authentication | Authentication type | **Leave on secrets** — see below |
+
+> **Leave the Authentication tab on secrets**, even though Microsoft's own guide
+> suggests managed identity there. The watchdog remembers what it has already
+> sent in Table Storage, and reaches it through the `AzureWebJobsStorage`
+> connection string. Switching that tab to managed identity removes the
+> connection string, and the watchdog falls back to a local file that does not
+> work in Azure. Identities can be added once it works: see
+> [Optional hardening](#optional-hardening).
+
+Select **Review + create**, then **Create**. It takes a few minutes. Creating
+it also commits a workflow file into your fork and starts the first deploy,
+**which is broken**. The next step fixes it.
+
+### 3. Fix the deploy workflow
+
+The workflow Azure generates for Python deploys "successfully", and then the
+Function never loads: `ModuleNotFoundError: No module named 'requests'`. It
+installs the dependencies onto the build machine instead of into the package,
+and its zip command skips the hidden folder they belong in.
+
+In your fork on GitHub, open `.github/workflows/`. Azure added a file there
+named after your app. Edit it with the pencil icon and change two lines:
+
+| Step | Generated | Change to |
+|---|---|---|
+| Install | `pip install -r requirements.txt` | `pip install -r requirements.txt --target=".python_packages/lib/site-packages"` |
+| Zip | `zip release.zip ./* -r` | `zip -r -q release.zip . -x '.git/*' '.github/*'` |
+
+Commit to `main`. That runs the workflow again, and this time it deploys an app
+that loads.
+
+[`.github/deploy-workflow.example.yml`](.github/deploy-workflow.example.yml) has
+the whole corrected build job, plus two checks that fail the build if the
+dependencies ever go missing again. To use it, replace the generated build job
+with it, and keep the generated deploy job: its secret names are unique to your
+app.
+
+**Check it worked.** The run passes under your fork's **Actions** tab, and the
+Function App's **Overview** page lists `backup_watchdog` under **Functions**. If
+the function is missing, the dependencies did not ship: recheck both edits.
+
+- If the **Actions** tab says workflows are disabled on this fork, enable them
+  and re-run the latest workflow.
+- Reconfiguring **Deployment Center** later rewrites this file and brings the
+  bug back. Reapply the fix.
+- This route ships the whole repository except `.git` and `.github`;
+  `.funcignore` only applies to command-line deploys. Nothing in the repository
+  is secret, so that is harmless.
+
+### 4. Add the settings
+
+A deploy ships code only. Settings live in the Function App, and these must
+have values before anything runs:
+
+| Setting | |
+|---|---|
+| `COVE_PARTNER` | Console name **including** any parenthesised email |
+| `COVE_USERNAME` | The API user's login name |
+| `COVE_PASSWORD` | The token, shown once at creation |
+| `SMTP_HOST` | Your mail host |
+| `ALERT_FROM` | Sender your provider allows |
+| `ALERT_TO` | Where alerts go |
+
+Plus `SMTP_USERNAME` and `SMTP_PASSWORD` if your mail provider requires
+authentication — most hosted ones do.
+
+Until these have values, **every run fails loudly**. That is the design
+refusing to look healthy while it is inert, not a broken deployment.
+
+Everything else has a default in the code, but add the full set anyway so every
+setting is visible and adjustable in the portal.
+[`azure-app-settings.txt`](azure-app-settings.txt) holds all of them, with
+defaults filled in and the required ones blank:
+
+1. **Function App → Settings → Environment variables → Advanced edit**.
+2. Put the cursor just before the final `]` at the very end of the text.
+3. Paste everything below the file's `COPY BELOW THIS LINE` marker. The block
+   starts with a comma so it joins the list that is already there.
+4. **OK**, then **Apply**.
+5. Fill in the required values listed above, then **Apply** again.
+
+> **Advanced edit replaces everything.** Keep `AzureWebJobsStorage`,
+> `APPLICATIONINSIGHTS_CONNECTION_STRING` and
+> `DEPLOYMENT_STORAGE_CONNECTION_STRING` — losing them breaks the app.
+
+Every setting's format is in the [configuration reference](#configuration).
+For the Cove token and SMTP password, a Key Vault reference is better than the
+value itself; see [Optional hardening](#optional-hardening). It can wait until
+the watchdog works.
+
+> **Do not set `WEBSITE_TIME_ZONE`.** The timer runs in UTC on purpose; the
+> application converts to local time itself using `WATCHDOG_TIMEZONE` to decide
+> when the daily re-alert and weekly report fire. Two independent timezone
+> interpretations disagree at daylight-saving boundaries and will send at the
+> wrong hour twice a year.
+
+> **Port 25 is blocked outbound** on most Azure compute. Use 587 with STARTTLS,
+> or 2525.
+
+### 5. Test it
+
+A healthy fleet sends no email, so waiting proves little. Instead, briefly make
+every backup look late. In **Environment variables**, change three settings and
+**Apply**:
+
+| Setting | Test value | Effect |
+|---|---|---|
+| `WATCHDOG_SCHEDULE` | `0 */5 * * * *` | Runs every 5 minutes instead of hourly |
+| `WATCHDOG_THRESHOLD_HOURS` | `0.1` | Anything not backed up in the last 6 minutes alerts |
+| `WATCHDOG_TABLE_NAME` | `covewatchdogtest` | Keeps the test out of the real state table |
+
+Within about ten minutes an alert should arrive for each monitored device, or a
+single summary if there are more than `WATCHDOG_MAX_EMAILS_PER_RUN`. Runs, and
+any errors, show on the function's **Invocations** tab and in **Log stream**.
+
+Then put all three back — `0 0 * * * *`, `4` and `covewatchdog` — and
+**Apply**. You can delete the test table from the storage account's **Storage
+browser → Tables**.
+
+**Why the throwaway table.** The watchdog remembers what it has sent. Test
+against the real table and, when the threshold goes back to 4, every device
+"recovers" and sends an all-clear. Remembering also means an alert already sent
+today is not repeated, so a second test needs a new table name.
+
+**If nothing arrives,** the change may have landed just after a run started:
+wait for the next one. Then look on the **Invocations** tab for an error.
+
+### 6. Alert if the watchdog stops
+
+**This is not optional.** Everything above tells you when *backups* fail.
+Nothing in this repository can tell you when the *Function* stops running,
+because at that point none of it is running.
+
+First confirm the runs are visible. In your **Application Insights** resource,
+open **Logs** and run:
+
+```kusto
+requests
+| where name == "backup_watchdog"
+| project timestamp, success
+| order by timestamp desc
 ```
 
-### Prerequisites
+You should see a row per run. Both rules below are built on this query, so if
+it returns nothing after the function has run, sort that out before relying on
+them.
+
+Then, in the same resource, **Alerts → Create → Alert rule**, with **Custom log
+search** as the signal. Create two.
+
+**1. Failed run.** The Function raises only when it could not tell anyone, so
+this means "a problem nobody has heard about".
+
+```kusto
+requests
+| where name == "backup_watchdog" and success == false
+```
+
+Measure **Table rows**, aggregation **Count**, alert when **greater than 0**,
+look back **1 hour**, check every **1 hour**.
+
+**2. No successful run in 3 hours.** The Function has stopped being invoked:
+deleted, stopped, a broken deploy, a lapsed subscription.
+
+```kusto
+requests
+| where name == "backup_watchdog" and success == true
+```
+
+Measure **Table rows**, aggregation **Count**, alert when **less than 1**, look
+back **3 hours**, check every **1 hour**.
+
+For both, add an action group that emails you — ideally at an address that is
+**not** the alerts inbox, so one broken mailbox cannot hide both.
+
+**Then test them.** An untested dead-man's switch is decorative.
+
+- *No successful run:* **Stop** the Function App from its **Overview** page.
+  After a little over three hours the alert should fire. **Start** it again.
+- *Failed run:* repeat step 5's test with a new table name, such as
+  `covewatchdogtest2`, and `SMTP_HOST` set to `smtp.invalid`. The watchdog then
+  has alerts it cannot send, which is exactly the case this rule is for. Put
+  everything back afterwards.
+
+The weekly report is the third layer: if it stops arriving on Monday morning,
+something is wrong regardless of what any alert says.
+
+### 7. Updating
+
+On your fork's GitHub page, select **Sync fork → Update branch**. That updates
+`main`, which runs your deploy workflow; there is nothing to do in Azure. The
+sync never touches your workflow file, because that file exists only in your
+fork.
+
+Settings added by an update have defaults in the code, so the app keeps working
+without them. To make a new one visible in the portal, compare
+`azure-app-settings.txt` with your **Environment variables** and add what is
+missing.
+
+### Cost
+
+At hourly execution this sits well inside the Flex Consumption plan's monthly
+free grant. Expect to pay for the storage account, which will be pennies a
+month, and a small fixed monthly charge for each alert rule. Application
+Insights has a free ingestion allowance that this will not approach.
+
+### Removing it
+
+**Resource groups →** yours **→ Delete resource group**. That removes the
+Function App, its storage, Application Insights and the deploy identity
+together. A Log Analytics workspace picked during creation may live in a
+different resource group, so check for it. Then delete your fork if you no
+longer want it.
+
+### Optional hardening
+
+Both of these can be done any time after the watchdog works.
+
+#### Credentials in Key Vault
+
+Keeps the Cove token and SMTP password out of the app settings, so anyone who
+can read the settings still cannot read the secrets.
+
+1. Create a **Key Vault**. The defaults are fine, including the Azure RBAC
+   permission model.
+2. On the vault, **Access control (IAM) → Add role assignment**: give yourself
+   **Key Vault Secrets Officer**, without which you cannot add secrets.
+3. **Secrets → Generate/Import**: add the Cove token and the SMTP password, for
+   example as `cove-password` and `smtp-password`.
+4. On the Function App, **Settings → Identity**: turn **System assigned** on.
+5. On the vault, **Access control (IAM) → Add role assignment**: give the
+   Function App's identity **Key Vault Secrets User**.
+6. Set `COVE_PASSWORD` to
+   `@Microsoft.KeyVault(SecretUri=https://<vault>.vault.azure.net/secrets/cove-password/)`,
+   and `SMTP_PASSWORD` likewise, then **Apply**.
+
+**Environment variables** shows whether each reference resolved. One that did
+not passes the literal `@Microsoft.KeyVault(...)` text to the app, and the next
+run fails and says so. No code change is needed: the application reads
+everything through the environment.
+
+#### State through a managed identity
+
+By default state is reached with the storage connection string the Function
+App already has. To use an identity instead:
+
+1. On the Function App, **Settings → Identity**: turn **System assigned** on,
+   if it is not already.
+2. On the storage account, **Access control (IAM) → Add role assignment**: give
+   the Function App's identity **Storage Table Data Contributor**.
+3. Set `WATCHDOG_TABLE_ACCOUNT_URL` to
+   `https://<storage-account>.table.core.windows.net`, then **Apply**.
+
+The code prefers the identity whenever that URL is set, and stops using the
+connection string for state.
+
+### Deploy from the command line
+
+<details>
+<summary>Azure CLI and Core Tools instead of the portal</summary>
 
 ```bash
 az --version          # Azure CLI, 2.60.0 or later for Flex Consumption
@@ -151,18 +413,19 @@ func --version        # Azure Functions Core Tools v4
 az login
 ```
 
-### 1. Create the resources
-
-Names for the storage account and Function App must be **globally unique**. The
-storage account must be lowercase alphanumeric, 3–24 characters.
-
-Flex Consumption is not available in every region, so pick from the supported
-list:
+Ask your own subscription which Python versions and regions Flex offers, rather
+than trusting any documentation, including this:
 
 ```bash
+az functionapp list-runtimes --os linux \
+  --query "linux[?starts_with(runtime,'python')].{runtime:runtime, version:version}" -o table
+
 az functionapp list-flexconsumption-locations \
   --query "sort_by(@, &name)[].{Region:name}" -o table
 ```
+
+Create the resources. Storage account names must be globally unique, lowercase
+alphanumeric, 3–24 characters:
 
 ```bash
 RG=rg-cove-watchdog
@@ -191,8 +454,11 @@ az functionapp create \
 echo "Function App: $APP"
 ```
 
-<details>
-<summary>Classic Consumption instead (capped at Python 3.12)</summary>
+This creates Application Insights too. No table needs creating: it is created
+on first use.
+
+Classic Consumption instead, where Flex is not offered — capped at Python 3.12,
+with a documented migration path away from it:
 
 ```bash
 az functionapp create \
@@ -206,187 +472,93 @@ az functionapp create \
   --os-type Linux
 ```
 
-Available in more regions, but it cannot go past Python 3.12 and Microsoft
-documents a migration path away from it. Fine if Flex is not offered where you
-need to run.
-</details>
-
-This creates an Application Insights resource automatically — you need it for
-step 5.
-
-**No table needs creating.** State lives in Azure Table Storage in the account
-above, reached through the `AzureWebJobsStorage` connection string the Function
-App already has, and the table is created on first use.
-
-### 2. Configure application settings
-
-Every setting is listed with its format in the
-[configuration reference](#configuration). These must have a value before
-anything runs:
-
-| Setting | |
-|---|---|
-| `COVE_PARTNER` | Console name **including** any parenthesised email |
-| `COVE_USERNAME` | The API user's login name |
-| `COVE_PASSWORD` | The token, shown once at creation |
-| `SMTP_HOST` | Your mail host |
-| `ALERT_FROM` | Sender your provider allows |
-| `ALERT_TO` | Where alerts go |
-
-Plus `SMTP_USERNAME` and `SMTP_PASSWORD` if your mail provider requires
-authentication — most hosted ones do.
-
-Until these have values, **every run fails loudly**. That is the design
-refusing to look healthy while it is inert, not a broken deployment.
-
-**Deploying code does not create settings.** A deploy ships code only; app
-settings are separate. Everything else has a default in the code, so it only
-needs to exist in Azure if you want it visible and adjustable in the portal.
-Two ways to add the full set:
-
-**Portal, no tools needed.** Open
-[`azure-app-settings.txt`](azure-app-settings.txt). It holds every setting,
-with defaults filled in and the required ones blank. Then:
-
-1. **Function App → Settings → Environment variables → Advanced edit**.
-2. Put the cursor just before the final `]` at the very end of the text.
-3. Paste everything below the file's `COPY BELOW THIS LINE` marker. The block
-   starts with a comma so it joins the list that is already there.
-4. **OK**, then **Apply**.
-5. Fill in the required values listed above, then **Apply** again.
-
-> **Advanced edit replaces everything.** Keep `AzureWebJobsStorage`,
-> `APPLICATIONINSIGHTS_CONNECTION_STRING` and
-> `DEPLOYMENT_STORAGE_CONNECTION_STRING` — losing them breaks the app.
-
-`pwsh scripts/setup-app-settings.ps1 -OutputJson` prints the same block, if
-you would rather generate it than copy it.
-
-**Azure CLI.** Adds only what is missing and never overwrites, so it is safe
-to re-run after pulling an update that introduces a new setting:
+Add every setting. This adds only what is missing and never overwrites, so it
+is safe to re-run after an update introduces a new setting. Then fill in the
+required values as in step 4:
 
 ```bash
-pwsh scripts/setup-app-settings.ps1 -AppName "<app>" -ResourceGroup "<rg>"
+pwsh scripts/setup-app-settings.ps1 -AppName $APP -ResourceGroup $RG
 ```
 
-> **Do not set `WEBSITE_TIME_ZONE`.** The timer runs in UTC on purpose; the
-> application converts to local time itself using `WATCHDOG_TIMEZONE` to decide
-> when the daily re-alert and weekly report fire. Two independent timezone
-> interpretations disagree at daylight-saving boundaries and will send at the
-> wrong hour twice a year.
+`pwsh scripts/setup-app-settings.ps1 -OutputJson` prints the paste block from
+step 4 instead.
 
-> **Port 25 is blocked outbound** on most Azure compute. Use 587 with STARTTLS,
-> or 2525.
-
-### 3. Deploy the code
+Deploy. This builds on Azure and honours `.funcignore`, which keeps tests,
+exploration scripts, `.env` and local state out of the package:
 
 ```bash
 func azure functionapp publish $APP
 ```
 
-`.funcignore` keeps tests, exploration scripts, `.env` and local state out of
-the package.
-
-Or connect your repository under the Function App's **Deployment Center**,
-which sets up a GitHub Actions workflow that deploys on every push to the
-branch. That is the route that makes syncing a fork update the app.
-
-> **The workflow Deployment Center generates is broken for Python.** It deploys,
-> reports success, and the Function never loads:
-> `ModuleNotFoundError: No module named 'requests'`. Two lines in its build job
-> need changing:
->
-> | Step | Generated | Change to |
-> |---|---|---|
-> | Install | `pip install -r requirements.txt` | `pip install -r requirements.txt --target=".python_packages/lib/site-packages"` |
-> | Zip | `zip release.zip ./* -r` | `zip -r -q release.zip . -x '.git/*' '.github/*'` |
->
-> The first installs the dependencies into the package instead of the build
-> machine; the second stops the zip skipping the hidden folder they go in.
-> [`.github/deploy-workflow.example.yml`](.github/deploy-workflow.example.yml)
-> has the corrected build job, plus checks that fail the build if dependencies
-> go missing again. Keep the deploy job Azure generated: its secret names are
-> unique to your app. Reconfiguring Deployment Center rewrites the file, so
-> reapply the fix afterwards.
->
-> This route ignores `.funcignore` and ships everything except `.git` and
-> `.github`. Nothing in the repository is secret, so that is harmless.
-
-### 4. Verify it runs
-
-The timer fires hourly, which is a slow feedback loop. Speed it up temporarily:
+Test, as in step 5, and watch the output:
 
 ```bash
-# Run every 5 minutes (six-field NCRONTAB: seconds first)
 az functionapp config appsettings set --name $APP --resource-group $RG \
-  --settings "WATCHDOG_SCHEDULE=0 */5 * * * *"
+  --settings "WATCHDOG_SCHEDULE=0 */5 * * * *" "WATCHDOG_THRESHOLD_HOURS=0.1" \
+             "WATCHDOG_TABLE_NAME=covewatchdogtest"
 
 az webapp log tail --name $APP --resource-group $RG
-```
 
-You should see the run logged, and — if anything is actually failing — an email.
-Put it back afterwards:
-
-```bash
 az functionapp config appsettings set --name $APP --resource-group $RG \
-  --settings "WATCHDOG_SCHEDULE=0 0 * * * *"
+  --settings "WATCHDOG_SCHEDULE=0 0 * * * *" "WATCHDOG_THRESHOLD_HOURS=4" \
+             "WATCHDOG_TABLE_NAME=covewatchdog"
 ```
 
-A good first test is to set `WATCHDOG_THRESHOLD_HOURS` to something tiny (say
-`0.1`) so a real alert fires against real devices, confirm the email arrives,
-then set it back to `4`.
-
-### 5. Set up the alert that catches a dead watchdog
-
-**This is not optional.** Everything above tells you when *backups* fail.
-Nothing in this repository can tell you when the *Function* stops running,
-because at that point none of it is running.
-
-In Application Insights for your Function App, create two alert rules:
-
-1. **Failed executions** — fires when the Function raises. It raises only when
-   it could not notify anyone, so this means "a problem nobody has been told
-   about".
-2. **No successful executions in the last 3 hours** — fires when the Function
-   has stopped being invoked at all. This is the one that catches a deleted
-   Function, an expired subscription, or a broken deployment.
-
-Point both at an address that is **not** the same inbox as the alerts, if you
-can. Then test them — an untested dead-man's switch is decorative.
-
-The weekly report is the third layer: if the report stops arriving on Monday
-morning, something is wrong regardless of what any alert says.
-
-### Cost
-
-At hourly execution this sits well inside the Flex Consumption plan's monthly
-free grant. Expect
-to pay only for the storage account, which will be pennies a month. Application
-Insights has a free ingestion allowance that this will not approach.
-
-### Removing it
+Step 6 still applies. Remove everything with:
 
 ```bash
 az group delete --name $RG --yes
 ```
 
-### Optional hardening: managed identity for state
+</details>
 
-By default state is reached with the storage connection string that already
-exists in the Function App. To use a managed identity instead:
+---
 
-1. Enable a system-assigned identity on the Function App.
-2. Grant it **Storage Table Data Contributor** on the storage account.
-3. Set `WATCHDOG_TABLE_ACCOUNT_URL=https://<storage>.table.core.windows.net`.
+## Run it locally (optional)
 
-The code prefers the identity whenever that URL is set, and drops the
-connection string — one fewer secret to rotate.
+Useful before deploying, to see exactly what the watchdog would do against your
+fleet, and later for debugging. Nothing here writes to Cove, and nothing sends
+email unless you pass `--send`.
 
-Cove and SMTP credentials can likewise move to Key Vault, referenced from
-application settings as
-`@Microsoft.KeyVault(SecretUri=https://<vault>.vault.azure.net/secrets/<name>/)`.
-No code change is needed: the application reads everything through the
-environment.
+Use the same Python version you deploy. If they differ you are not testing what
+you ship.
+
+### 1. Configure
+
+```bash
+cp .env.example .env
+```
+
+Fill it in with the details from [Before you start](#before-you-start).
+
+### 2. Install and verify
+
+```bash
+python -m venv .venv
+.venv/bin/pip install -r requirements.txt
+```
+
+On Windows the interpreter is `.venv/Scripts/python.exe`.
+
+```bash
+.venv/bin/python check_auth.py        # credentials and permissions
+.venv/bin/python check_backups.py --all   # what it sees, and what would alert
+.venv/bin/python preview_emails.py    # every email variant
+.venv/bin/python run_watchdog.py      # a full run, dry
+```
+
+`run_watchdog.py` sends nothing and writes no state unless you pass `--send`.
+
+### 3. Test email delivery
+
+Fill in the SMTP block in `.env`, then:
+
+```bash
+.venv/bin/python send_test_email.py --send
+```
+
+That renders a realistic alert from a **synthetic** device, so you can prove
+delivery without waiting for a real failure or mailing about a healthy machine.
 
 ---
 
