@@ -762,6 +762,8 @@ version was wrong in a way that would have been **silent**.
 undocumented Cove API behaviour this depends on. Read it before changing
 anything in `cove/`.
 
+[![Architecture diagram of pip513/cove-watchdog](https://gitdiagram.com/pip513/cove-watchdog/diagram.png)](https://gitdiagram.com/pip513/cove-watchdog?utm_source=readme&utm_medium=picture)
+
 ---
 
 ## Licence
