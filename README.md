@@ -640,6 +640,7 @@ application settings under **Environment variables**. The names are identical.
 | `WATCHDOG_TIMEZONE` | No | `America/New_York` | Timezone name: `America/Chicago`, `America/Denver`, `America/Los_Angeles`, `Europe/London`, `UTC` |
 | `WATCHDOG_REALERT_HOUR` | No | `8` | Whole hour, 0–23, local. When a still-failing device is re-alerted each day. The first alert is always immediate |
 | `WATCHDOG_MAX_EMAILS_PER_RUN` | No | `25` | Whole number, 1 or more. Above this, one summary replaces the individual alerts |
+| `WATCHDOG_IGNORE_AUTH_FAILURES` | No | `2` | Whole number, 0 or more. Cove sometimes rejects a valid login once, so this many authentication failures in a row pass without a failure email; the next one sends it. Any other result resets the count. `0` emails the first. Tolerated runs log a warning and count as successful |
 | `WATCHDOG_SCHEDULE` | No | `0 0 * * * *` | NCRONTAB in **UTC**, five or six fields. Six fields puts seconds first. See below |
 
 #### How `WATCHDOG_SCHEDULE` works

@@ -78,6 +78,12 @@ class Config:
     #: summary instead. Guards against a site-wide outage - or a bug here -
     #: producing a hundred emails.
     max_emails_per_run: int = 25
+    #: Consecutive authentication failures to let pass without a failure
+    #: email. Cove occasionally rejects a valid login once and accepts it on
+    #: the next run; this keeps that from mailing anyone. The run after the
+    #: last tolerated one emails as normal, and any other outcome resets the
+    #: count. 0 emails on the first.
+    auth_failures_ignored: int = 2
 
     @classmethod
     def from_env(cls) -> "Config":
@@ -89,6 +95,7 @@ class Config:
             display_timezone=env_str("WATCHDOG_TIMEZONE", "America/New_York"),
             realert_hour=env_int("WATCHDOG_REALERT_HOUR", 8),
             max_emails_per_run=env_int("WATCHDOG_MAX_EMAILS_PER_RUN", 25),
+            auth_failures_ignored=env_int("WATCHDOG_IGNORE_AUTH_FAILURES", 2),
         )
 
     def validate(self) -> None:
@@ -115,6 +122,8 @@ class Config:
             raise CoveConfigError("WATCHDOG_REALERT_HOUR must be between 0 and 23")
         if self.max_emails_per_run < 1:
             raise CoveConfigError("WATCHDOG_MAX_EMAILS_PER_RUN must be at least 1")
+        if self.auth_failures_ignored < 0:
+            raise CoveConfigError("WATCHDOG_IGNORE_AUTH_FAILURES cannot be negative")
 
 
 @dataclass

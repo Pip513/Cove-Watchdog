@@ -199,4 +199,7 @@ def plan_for_delivered(plan: DispatchPlan, delivery: DeliveryResult) -> Dispatch
         # Forgetting a device needs no message, so it is never blocked by one.
         forgotten=plan.forgotten,
         capped=plan.capped,
+        # A count of attempts, not of deliveries, so it always carries over.
+        auth_failure_streak=plan.auth_failure_streak,
+        tolerated=plan.tolerated,
     )

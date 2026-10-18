@@ -16,6 +16,9 @@ Cadence:
   - a device that recovers produces one all-clear, then nothing
   - a device that is muted or disappears is forgotten silently: it was not
     fixed, so claiming it recovered would be a lie
+  - an authentication failure is tolerated, silently, for up to
+    `auth_failures_ignored` runs in a row, because Cove sometimes rejects a
+    valid login once. The next one emails as any failure would
 
 Nothing here sends anything. `plan()` decides; the caller sends; `commit()`
 records. Keeping the record separate means a send failure does not mark a
@@ -30,10 +33,11 @@ from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
 from .detection import Config, DeviceResult
-from .health import CheckFailure, should_send_failure
+from .health import CheckFailure, FailureKind, should_send_failure
 from .report import ReportConfig, is_report_due
 from .runner import CheckOutcome
 from .state import (
+    META_AUTH_FAILURE_STREAK,
     META_FAILURE_FIRST_AT,
     META_FAILURE_KIND,
     META_FAILURE_LAST_SENT,
@@ -105,6 +109,12 @@ class DispatchPlan:
     #: Set when the per-run email cap trips; the caller should send one
     #: summary instead of the individual alerts.
     capped: bool = False
+    #: Consecutive authentication failures including this run, to record.
+    #: 0 clears the count; None leaves it as it is.
+    auth_failure_streak: int | None = None
+    #: This run's failure is an authentication failure within the tolerance:
+    #: nothing is sent, and only the count is recorded.
+    tolerated: bool = False
 
     @property
     def message_count(self) -> int:
@@ -134,9 +144,28 @@ def plan(
     """Decide what this run should send. Reads state; does not write it."""
     now = outcome.now
     result = DispatchPlan(now=now)
+    streak = int(store.get_meta(META_AUTH_FAILURE_STREAK) or 0)
 
     # --- the check itself failed ----------------------------------------
     if outcome.failure is not None:
+        if outcome.failure.kind is FailureKind.AUTHENTICATION:
+            streak += 1
+            result.auth_failure_streak = streak
+            # Only while nothing has been reported yet. Once a failure email
+            # has gone out, the outage is known and the daily cadence applies.
+            if (
+                streak <= config.auth_failures_ignored
+                and not store.get_meta(META_FAILURE_KIND)
+            ):
+                log.warning(
+                    "Authentication failed; %d of %d in a row tolerated",
+                    streak,
+                    config.auth_failures_ignored,
+                )
+                result.tolerated = True
+                return result
+        elif streak:
+            result.auth_failure_streak = 0
         last_sent = store.get_meta_time(META_FAILURE_LAST_SENT)
         if should_send_failure(now, last_sent):
             result.failure = outcome.failure
@@ -144,6 +173,10 @@ def plan(
         # fleet's state, so nothing about a device has been learned - not that
         # it is still failing, and not that it recovered.
         return result
+
+    # Any run that gets past login breaks the streak.
+    if streak:
+        result.auth_failure_streak = 0
 
     # --- the check recovered after failing -------------------------------
     previous_kind = store.get_meta(META_FAILURE_KIND)
@@ -227,6 +260,13 @@ def commit(plan: DispatchPlan, store: StateStore, *, sent: bool = True) -> None:
         return
 
     now = plan.now
+
+    # Recorded whether or not anything was delivered: it counts attempts.
+    if plan.auth_failure_streak is not None:
+        store.set_meta(
+            META_AUTH_FAILURE_STREAK,
+            str(plan.auth_failure_streak) if plan.auth_failure_streak else None,
+        )
 
     if plan.failure is not None:
         store.set_meta_time(META_FAILURE_LAST_SENT, now)

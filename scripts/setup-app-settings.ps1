@@ -94,6 +94,12 @@ $settings = [ordered]@{
     # instead. Guards against a site-wide outage opening a hundred tickets.
     "WATCHDOG_MAX_EMAILS_PER_RUN" = "25"
 
+    # Cove sometimes rejects a valid login once and accepts it on the next run.
+    # This many authentication failures in a row pass without a failure email;
+    # the next one sends it. Any other result resets the count. 0 = email the
+    # first one.
+    "WATCHDOG_IGNORE_AUTH_FAILURES" = "2"
+
     # --- Weekly report ----------------------------------------------------
     # Sent whether or not anything is wrong. Its absence is the signal that the
     # watchdog itself has stopped, so leaving this enabled is recommended.

@@ -111,6 +111,7 @@ print("\nDevice alert cadence over consecutive runs\n")
 
 store = InMemoryStateStore()
 broken = {"D01": 0.5, "D10": 50.0}  # SQL dead, files fine
+healthy = {"D01": 0.5, "D10": 0.5}
 
 p = run(at("2026-09-21 17:00"), [device(at("2026-09-21 17:00"), ages=broken)], store)
 check("first detection at 17:00 -> alerts immediately", len(p.alerts) == 1)
@@ -199,24 +200,25 @@ check("  its state is dropped", store.all_devices() == [])
 print("\nCheck failures\n")
 
 store = InMemoryStateStore()
-auth = CheckFailure(FailureKind.AUTHENTICATION, "token rejected")
+# Not authentication: that has its own tolerance, tested further down.
+outage = CheckFailure(FailureKind.API_UNREACHABLE, "connection timed out")
 now = at("2026-09-21 17:00")
-p = run(now, [device(now, ages=broken)], store, failure=auth)
+p = run(now, [device(now, ages=broken)], store, failure=outage)
 check("a failed run emails the failure", p.failure is not None)
 check("  and sends no device alerts", len(p.alerts) == 0)
 check("  and no all-clears", len(p.recoveries) == 0)
 
 now = at("2026-09-21 18:00")
-p = run(now, [device(now, ages=broken)], store, failure=auth)
+p = run(now, [device(now, ages=broken)], store, failure=outage)
 check("still failing an hour later -> no second email", p.failure is None)
 
 now = at("2026-09-22 18:00")
-p = run(now, [device(now, ages=broken)], store, failure=auth)
+p = run(now, [device(now, ages=broken)], store, failure=outage)
 check("still failing a day later -> emails again", p.failure is not None)
 
 now = at("2026-09-22 19:00")
 p = run(now, [device(now, ages=broken)], store)
-check("the check recovers -> says so", p.failure_recovered == "authentication")
+check("the check recovers -> says so", p.failure_recovered == "api unreachable")
 check("  and the backlogged device alert goes out", len(p.alerts) == 1)
 now = at("2026-09-22 20:00")
 p = run(now, [device(now, ages=broken)], store)
@@ -229,7 +231,7 @@ now = at("2026-09-21 17:00")
 run(now, [device(now, ages=broken)], store)
 before = store.get_device(1)
 now = at("2026-09-22 09:00")
-run(now, [], store, failure=auth)  # a failed run returns no devices at all
+run(now, [], store, failure=outage)  # a failed run returns no devices at all
 after = store.get_device(1)
 check(
     "a failing run does not forget a device it could not see",
@@ -330,7 +332,7 @@ check("  tagged as an alert", messages[0].kind == "alert")
 
 p, outcome = planned(
     now, [device(now, ages=broken)], InMemoryStateStore(),
-    failure=CheckFailure(FailureKind.AUTHENTICATION, "token rejected"),
+    failure=CheckFailure(FailureKind.API_UNREACHABLE, "connection timed out"),
 )
 messages = render(p, outcome, CONFIG, NO_REPORT)
 check("a failed run renders only the failure", [m.kind for m in messages] == ["failure"])
@@ -609,6 +611,95 @@ check("weekly report footer names its timezone", "Wednesday at 08:00 EDT" in rep
 
 longest = max(len(l) for text in (body, body_14, report) for l in text.splitlines())
 check("no line passes the ~78 characters mail clients wrap at", longest <= 78, f"{longest}")
+
+print("\nAuthentication blips\n")
+
+from types import SimpleNamespace  # noqa: E402
+
+import run_watchdog  # noqa: E402
+from cove.dispatch import DispatchPlan  # noqa: E402
+from cove.state import META_AUTH_FAILURE_STREAK  # noqa: E402
+
+auth = CheckFailure(FailureKind.AUTHENTICATION, "token rejected")
+store = InMemoryStateStore()
+now = at("2026-09-21 17:00")
+run(now, [device(now, ages=broken)], store)  # a known failing device
+before = store.get_device(1)
+
+p = run(at("2026-09-22 09:00"), [], store, failure=auth)
+check("1st auth failure in a row -> tolerated, nothing sent", p.tolerated and p.is_empty)
+p = run(at("2026-09-22 10:00"), [], store, failure=auth)
+check("2nd in a row -> still tolerated", p.tolerated and p.is_empty)
+check("  device state untouched while tolerating", store.get_device(1) == before)
+p = run(at("2026-09-22 11:00"), [], store, failure=auth)
+check("3rd in a row -> failure email", p.failure is not None and not p.tolerated)
+check("  the count keeps going", store.get_meta(META_AUTH_FAILURE_STREAK) == "3")
+p = run(at("2026-09-22 12:00"), [], store, failure=auth)
+check("4th -> no second email the same day", p.failure is None and not p.tolerated)
+now = at("2026-09-22 13:00")
+p = run(now, [device(now, ages=broken)], store)
+check("success after an emailed failure -> says it recovered",
+      p.failure_recovered == "authentication")
+check("  and clears the count", store.get_meta(META_AUTH_FAILURE_STREAK) is None)
+
+store = InMemoryStateStore()
+run(at("2026-09-22 09:00"), [], store, failure=auth)
+run(at("2026-09-22 10:00"), [], store, failure=auth)
+now = at("2026-09-22 11:00")
+p = run(now, [device(now, ages=healthy)], store)
+check("success after tolerated failures -> no recovery email",
+      p.failure_recovered is None and p.is_empty)
+check("  and the count resets", store.get_meta(META_AUTH_FAILURE_STREAK) is None)
+p = run(at("2026-09-22 12:00"), [], store, failure=auth)
+check("the next blip starts again from 1",
+      p.tolerated and store.get_meta(META_AUTH_FAILURE_STREAK) == "1")
+
+store = InMemoryStateStore()
+run(at("2026-09-22 09:00"), [], store, failure=auth)
+p = run(at("2026-09-22 10:00"), [], store, failure=outage)
+check("a different failure is not tolerated", p.failure is not None)
+check("  and breaks the auth count", store.get_meta(META_AUTH_FAILURE_STREAK) is None)
+p = run(at("2026-09-22 11:00"), [], store, failure=auth)
+check("an auth failure while a failure email is out -> normal cadence",
+      not p.tolerated and p.failure is None)
+
+strict = Config(threshold_hours=4.0, realert_hour=8, auth_failures_ignored=0)
+p = run(at("2026-09-22 09:00"), [], InMemoryStateStore(), failure=auth, config=strict)
+check("WATCHDOG_IGNORE_AUTH_FAILURES=0 -> emails the first one", p.failure is not None)
+
+try:
+    Config(auth_failures_ignored=-1).validate()
+    check("a negative tolerance is rejected", False)
+except Exception as exc:
+    check("a negative tolerance is rejected", "WATCHDOG_IGNORE_AUTH_FAILURES" in str(exc))
+
+partial = plan_for_delivered(
+    DispatchPlan(now=now, failure=auth, auth_failure_streak=3),
+    SimpleNamespace(any_failed=True, sent=[]),
+)
+check("an undelivered failure email still records the count",
+      partial.failure is None and partial.auth_failure_streak == 3)
+
+# End to end through execute(), which the Function calls.
+real_run_check = run_watchdog.run_check
+try:
+    failed = CheckOutcome(now=at("2026-09-22 09:00"))
+    failed.failure = auth
+    run_watchdog.run_check = lambda config, report_config, now: failed
+    smtp = SmtpConfig(host="smtp.invalid", from_address="a@example.com",
+                      to_addresses=["b@example.com"])
+    store = InMemoryStateStore()
+    code, lines = run_watchdog.execute(CONFIG, NO_REPORT, smtp, store,
+                                       send_enabled=True, now=failed.now)
+    check("a tolerated run exits as a success", code == 0, str(lines))
+    check("  with a warning line", any(line.startswith("[warn]") for line in lines))
+    check("  and the count is saved", store.get_meta(META_AUTH_FAILURE_STREAK) == "1")
+    store = InMemoryStateStore()
+    run_watchdog.execute(CONFIG, NO_REPORT, smtp, store, send_enabled=False, now=failed.now)
+    check("a dry run saves no count", store.get_meta(META_AUTH_FAILURE_STREAK) is None)
+finally:
+    run_watchdog.run_check = real_run_check
+
 
 print()
 if _failures:

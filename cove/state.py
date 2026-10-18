@@ -35,6 +35,7 @@ META_REPORT_LAST_SENT = "report_last_sent"
 META_FAILURE_LAST_SENT = "failure_last_sent"
 META_FAILURE_FIRST_AT = "failure_first_at"
 META_FAILURE_KIND = "failure_kind"
+META_AUTH_FAILURE_STREAK = "auth_failure_streak"
 
 
 def _iso(value: datetime | None) -> str | None:

@@ -258,6 +258,18 @@ delivery broke.
 should be reported as soon as it goes blind, not next morning — then at most
 daily. A week-long outage produces 7 emails, not 168.
 
+The one exception is **authentication**. Cove occasionally rejects a valid
+login once and accepts it on the next run, so `dispatch.plan()` lets
+`WATCHDOG_IGNORE_AUTH_FAILURES` (default 2) consecutive auth failures pass
+without an email, counting them in the `auth_failure_streak` meta key. The run
+after the last tolerated one emails as normal, and any other outcome resets the
+count. It applies only while no failure email is outstanding, so an outage
+already reported keeps its daily cadence. A tolerated run exits 0 with a
+`[warn]` line, which `function_app.py` logs as a warning: by choice it counts
+as a successful run, so the "failed run" alert does not fire on a blip. The
+cost is up to two hours of blindness per blip, a deliberate trade-off.
+Only auth is tolerated; network errors still email on the first.
+
 #### `cove/runner.py`
 One run, with every failure path accounted for. `run_check()` **never raises**;
 it returns a `CheckOutcome`. An unhandled exception in an hourly job is
@@ -402,8 +414,9 @@ these do.
 suppression and content, `run_check` never raising, and SMTP config validation.
 
 #### `test_dispatch.py`
-77 cases covering the cadence, rendering, partial delivery, both state
-backends, and the reminder time alert emails promise. Consecutive runs are
+98 cases covering the cadence, rendering, partial delivery, both state
+backends, the reminder time alert emails promise, and the tolerance for
+authentication blips. Consecutive runs are
 simulated against a real store rather than asserting on a single call, because
 the rules that matter are about sequences.
 
@@ -513,7 +526,7 @@ On Windows the interpreter is `.venv/Scripts/python.exe`.
 
 ## Configuration reference
 
-The complete reference — all 31 settings with required, default and accepted
+The complete reference — all 32 settings with required, default and accepted
 format — is in **`README.md` under *Configuration***. It is deliberately not
 duplicated here: an earlier copy in this file drifted and silently lost seven
 settings. Keep it in one place.
@@ -570,6 +583,8 @@ name, `I78` active data sources, `I81` physical/virtual.
 - A muted or deleted device is forgotten **silently**. It was not fixed, so
   claiming it recovered would be a lie, and an open ticket is the correct signal
   that a human should look.
+- Up to `WATCHDOG_IGNORE_AUTH_FAILURES` authentication failures in a row send
+  nothing; the next one sends the failure email.
 - A failed run touches no device state at all. Treating "no devices returned" as
   "everything recovered" would clear every record during an API outage and
   re-alert the whole fleet afterwards.

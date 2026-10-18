@@ -56,7 +56,20 @@ def execute(
     dispatch = plan(outcome, store, config, report_config)
     messages = render(dispatch, outcome, config, report_config)
 
+    if dispatch.tolerated:
+        lines.append(
+            f"[warn] Cove rejected the login: {dispatch.auth_failure_streak} in a "
+            f"row, {config.auth_failures_ignored} tolerated "
+            "(WATCHDOG_IGNORE_AUTH_FAILURES). No failure email yet; the next "
+            "one sends it unless a run succeeds first."
+        )
+        commit(dispatch, store, sent=send_enabled)
+        return 0, lines
+
     if not messages:
+        # Nothing to send can still mean something to record, such as a
+        # cleared authentication count or a device to forget.
+        commit(dispatch, store, sent=send_enabled)
         lines.append("Nothing to send.")
         if not outcome.ok:
             # Suppressed by the daily cap rather than by there being no problem.

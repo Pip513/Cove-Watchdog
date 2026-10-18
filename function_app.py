@@ -89,8 +89,10 @@ def backup_watchdog(timer: func.TimerRequest) -> None:
         now=started,
     )
 
+    # A tolerated login failure surfaces only here, so it must log as a
+    # warning: the run itself counts as a success.
     for line in lines:
-        logging.info(line)
+        (logging.warning if line.startswith("[warn]") else logging.info)(line)
 
     elapsed = (datetime.now(tz=timezone.utc) - started).total_seconds()
 
